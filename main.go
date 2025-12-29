@@ -18,26 +18,23 @@ func main() {
 
 	// Create application with options
 	err := wails.Run(&options.App{
-		Title:     "GhostDraft",
-		Width:     400,
-		Height:    700,
-		MinWidth:  400,
-		MinHeight: 700,
-		MaxWidth:  400,
-		MaxHeight: 700,
+		Title:         "GhostDraft",
+		Width:         280,
+		Height:        120,
+		Frameless:     true,
+		AlwaysOnTop:   true,
+		DisableResize: false,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 15, G: 15, B: 15, A: 1},
+		BackgroundColour: &options.RGBA{R: 20, G: 20, B: 20, A: 255},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind: []interface{}{
 			app,
 		},
 		Windows: &windows.Options{
-			WebviewIsTransparent: false,
-			WindowIsTranslucent:  false,
-			DisableWindowIcon:    false,
+			DisableWindowIcon: true,
 		},
 	})
 

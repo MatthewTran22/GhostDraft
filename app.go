@@ -38,6 +38,16 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
+	// Position window to the right side of the screen
+	screens, err := runtime.ScreenGetAll(ctx)
+	if err == nil && len(screens) > 0 {
+		screen := screens[0]
+		// Position at right edge, vertically centered
+		x := screen.Size.Width - 300
+		y := (screen.Size.Height - 120) / 2
+		runtime.WindowSetPosition(ctx, x, y)
+	}
+
 	// Load data from Data Dragon and U.GG in parallel
 	go func() {
 		if err := a.champions.Load(); err != nil {
@@ -269,15 +279,27 @@ func (a *App) fetchAndEmitBuild(championID int, championName string, role string
 	}
 
 	enemyName := a.champions.GetName(laneOpponentID)
-	fmt.Printf("Matchup: %s vs %s = %.1f%% (%.0f games)\n", championName, enemyName, matchupWR, matchupGames)
+
+	// Determine matchup status: winning (>51%), losing (<49%), even (49-51%)
+	var matchupStatus string
+	if matchupWR >= 51.0 {
+		matchupStatus = "winning"
+	} else if matchupWR <= 49.0 {
+		matchupStatus = "losing"
+	} else {
+		matchupStatus = "even"
+	}
+
+	fmt.Printf("Matchup: %s vs %s = %.1f%% (%s, %.0f games)\n", championName, enemyName, matchupWR, matchupStatus, matchupGames)
 	runtime.EventsEmit(a.ctx, "build:update", map[string]interface{}{
-		"hasBuild":     true,
-		"championName": championName,
-		"role":         role,
-		"winRate":      fmt.Sprintf("%.1f%%", matchupWR),
-		"winRateLabel": fmt.Sprintf("vs %s", enemyName),
-		"enemyName":    enemyName,
-		"patch":        a.uggFetcher.GetPatch(),
+		"hasBuild":      true,
+		"championName":  championName,
+		"role":          role,
+		"winRate":       fmt.Sprintf("%.1f%%", matchupWR),
+		"winRateLabel":  fmt.Sprintf("vs %s", enemyName),
+		"enemyName":     enemyName,
+		"matchupStatus": matchupStatus,
+		"patch":         a.uggFetcher.GetPatch(),
 	})
 }
 
