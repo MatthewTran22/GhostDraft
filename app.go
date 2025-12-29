@@ -38,13 +38,17 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Position window to the right side of the screen
+	// Position and size window relative to screen
 	screens, err := runtime.ScreenGetAll(ctx)
 	if err == nil && len(screens) > 0 {
 		screen := screens[0]
+		// Size: ~20% width, ~55% height (roughly matches champ select sidebar)
+		width := screen.Size.Width * 20 / 100
+		height := screen.Size.Height * 55 / 100
+		runtime.WindowSetSize(ctx, width, height)
 		// Position at right edge, vertically centered
-		x := screen.Size.Width - 300
-		y := (screen.Size.Height - 120) / 2
+		x := screen.Size.Width - width - 20
+		y := (screen.Size.Height - height) / 2
 		runtime.WindowSetPosition(ctx, x, y)
 	}
 
