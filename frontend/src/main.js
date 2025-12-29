@@ -45,6 +45,9 @@ document.querySelector('#app').innerHTML = `
     <div class="build-card hidden" id="build-card">
         <div class="build-header">
             <span class="build-title" id="build-title">Build</span>
+        </div>
+        <div class="build-matchup">
+            <span class="winrate-label" id="winrate-label">Win Rate</span>
             <span class="build-winrate" id="build-winrate"></span>
         </div>
         <div class="build-footer" id="build-footer"></div>
@@ -72,6 +75,7 @@ const champTimer = document.getElementById('champ-select-timer');
 // Build elements
 const buildTitle = document.getElementById('build-title');
 const buildWinrate = document.getElementById('build-winrate');
+const winrateLabel = document.getElementById('winrate-label');
 const buildFooter = document.getElementById('build-footer');
 
 // Update UI based on connection status
@@ -156,6 +160,7 @@ function updateBuild(data) {
 
     // Update header
     buildTitle.textContent = `${data.championName}`;
+    winrateLabel.textContent = data.winRateLabel || 'Win Rate';
     buildWinrate.textContent = data.winRate;
 
     // Footer

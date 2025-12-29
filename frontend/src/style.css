@@ -177,9 +177,24 @@ body {
     color: #c89b3c;
 }
 
+.build-matchup {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background: #252525;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.winrate-label {
+    font-size: 12px;
+    color: #888;
+}
+
 .build-winrate {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
     color: #4caf50;
 }
 

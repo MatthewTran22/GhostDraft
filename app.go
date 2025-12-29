@@ -20,6 +20,7 @@ type App struct {
 	uggFetcher       *ugg.Fetcher
 	stopPoll         chan struct{}
 	lastFetchedChamp int
+	lastFetchedEnemy int
 }
 
 // NewApp creates a new App application struct
@@ -67,6 +68,7 @@ func (a *App) shutdown(ctx context.Context) {
 func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect bool) {
 	if !inChampSelect {
 		a.lastFetchedChamp = 0
+		a.lastFetchedEnemy = 0
 		runtime.EventsEmit(a.ctx, "champselect:update", map[string]interface{}{
 			"inChampSelect": false,
 		})
@@ -113,6 +115,16 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 
 	fmt.Printf("Player CellID: %d, Position: '%s', ChampID: %d\n",
 		session.LocalPlayerCellID, localPosition, localChampionID)
+
+	// Collect all enemy champion IDs
+	var enemyChampionIDs []int
+	fmt.Printf("Enemy team size: %d\n", len(session.TheirTeam))
+	for _, enemy := range session.TheirTeam {
+		if enemy.ChampionID > 0 {
+			enemyChampionIDs = append(enemyChampionIDs, enemy.ChampionID)
+			fmt.Printf("  Enemy: ChampID=%d\n", enemy.ChampionID)
+		}
+	}
 
 	// Find current action (hover/pick) - check for any action with a selected champion
 	var currentAction *lcu.ChampSelectAction
@@ -169,37 +181,104 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 
 	runtime.EventsEmit(a.ctx, "champselect:update", data)
 
-	// Fetch build data when champion changes (for both hover and lock, pick and ban)
+	// Check if all bans are completed (we're in pick phase)
+	hasIncompleteBan := false
+	for _, actionGroup := range session.Actions {
+		for _, action := range actionGroup {
+			if action.Type == "ban" && !action.Completed {
+				hasIncompleteBan = true
+				break
+			}
+		}
+		if hasIncompleteBan {
+			break
+		}
+	}
+
+	// Only fetch matchup data after all bans are done
+	if hasIncompleteBan {
+		return
+	}
+
+	// Fetch build data when champion changes or new enemies appear
 	if championID > 0 && championID != a.lastFetchedChamp {
 		a.lastFetchedChamp = championID
-		go a.fetchAndEmitBuild(championID, championName, localPosition)
+		go a.fetchAndEmitBuild(championID, championName, localPosition, enemyChampionIDs)
+	} else if len(enemyChampionIDs) > 0 && len(enemyChampionIDs) != a.lastFetchedEnemy {
+		a.lastFetchedEnemy = len(enemyChampionIDs)
+		go a.fetchAndEmitBuild(championID, championName, localPosition, enemyChampionIDs)
 	}
 }
 
-// fetchAndEmitBuild fetches build data from U.GG and emits it to frontend
-func (a *App) fetchAndEmitBuild(championID int, championName string, role string) {
-	fmt.Printf("Fetching U.GG data for %s (%s)...\n", championName, role)
+// fetchAndEmitBuild fetches matchup data from U.GG and emits it to frontend
+func (a *App) fetchAndEmitBuild(championID int, championName string, role string, enemyChampionIDs []int) {
+	fmt.Printf("Fetching U.GG matchup for %s (%s) vs %d enemies...\n", championName, role, len(enemyChampionIDs))
 
-	buildData, err := a.uggFetcher.FetchChampionData(championID, championName, role)
+	if len(enemyChampionIDs) == 0 {
+		runtime.EventsEmit(a.ctx, "build:update", map[string]interface{}{
+			"hasBuild":     true,
+			"championName": championName,
+			"role":         role,
+			"winRate":      "-",
+			"winRateLabel": "Waiting for enemy...",
+			"patch":        a.uggFetcher.GetPatch(),
+		})
+		fmt.Printf("No enemies detected yet for %s\n", championName)
+		return
+	}
+
+	// Fetch our matchups once - this gives us all enemies we face in our role
+	matchups, err := a.uggFetcher.FetchMatchups(championID, role)
 	if err != nil {
-		fmt.Printf("Failed to fetch build data: %v\n", err)
 		runtime.EventsEmit(a.ctx, "build:update", map[string]interface{}{
 			"hasBuild": false,
 			"error":    err.Error(),
 		})
+		fmt.Printf("Failed to fetch matchups: %v\n", err)
 		return
 	}
 
-	data := map[string]interface{}{
+	// Find enemy with highest game count in matchup data (likely lane opponent)
+	var laneOpponentID int
+	var matchupWR float64
+	var matchupGames float64
+	for _, enemyID := range enemyChampionIDs {
+		for _, m := range matchups {
+			if m.EnemyChampionID == enemyID && m.Games > matchupGames {
+				laneOpponentID = enemyID
+				matchupWR = m.WinRate
+				matchupGames = m.Games
+			}
+		}
+	}
+	if laneOpponentID > 0 {
+		fmt.Printf("Lane opponent (highest games): %d (%.1f%% WR, %.0f games)\n", laneOpponentID, matchupWR, matchupGames)
+	}
+
+	if laneOpponentID == 0 {
+		runtime.EventsEmit(a.ctx, "build:update", map[string]interface{}{
+			"hasBuild":     true,
+			"championName": championName,
+			"role":         role,
+			"winRate":      "-",
+			"winRateLabel": "No lane opponent found",
+			"patch":        a.uggFetcher.GetPatch(),
+		})
+		fmt.Printf("No lane opponent found in matchup data for %s\n", championName)
+		return
+	}
+
+	enemyName := a.champions.GetName(laneOpponentID)
+	fmt.Printf("Matchup: %s vs %s = %.1f%% (%.0f games)\n", championName, enemyName, matchupWR, matchupGames)
+	runtime.EventsEmit(a.ctx, "build:update", map[string]interface{}{
 		"hasBuild":     true,
 		"championName": championName,
 		"role":         role,
-		"winRate":      fmt.Sprintf("%.1f%%", buildData.WinRate),
+		"winRate":      fmt.Sprintf("%.1f%%", matchupWR),
+		"winRateLabel": fmt.Sprintf("vs %s", enemyName),
+		"enemyName":    enemyName,
 		"patch":        a.uggFetcher.GetPatch(),
-	}
-
-	runtime.EventsEmit(a.ctx, "build:update", data)
-	fmt.Printf("Build data loaded for %s: %.1f%% WR\n", championName, buildData.WinRate)
+	})
 }
 
 // pollForLeagueClient continuously checks for League Client
