@@ -89,9 +89,13 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 		runtime.EventsEmit(a.ctx, "build:update", map[string]interface{}{
 			"hasBuild": false,
 		})
+		runtime.WindowHide(a.ctx)
 		fmt.Println("Exited Champion Select")
 		return
 	}
+
+	// Show window when entering champ select
+	runtime.WindowShow(a.ctx)
 
 	// Find local player's champion and position
 	var localChampionID int

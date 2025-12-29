@@ -17,6 +17,7 @@ document.querySelector('#app').innerHTML = `
         </div>
 
         <div class="build-card hidden" id="build-card">
+            <div class="build-role" id="build-role"></div>
             <div class="build-matchup">
                 <span class="winrate-label" id="winrate-label">Win Rate</span>
                 <span class="build-winrate" id="build-winrate"></span>
@@ -29,6 +30,7 @@ const statusDot = document.getElementById('status-dot');
 const statusMessage = document.getElementById('status-message');
 const statusCard = document.getElementById('status-card');
 const buildCard = document.getElementById('build-card');
+const buildRole = document.getElementById('build-role');
 const buildWinrate = document.getElementById('build-winrate');
 const winrateLabel = document.getElementById('winrate-label');
 
@@ -53,6 +55,18 @@ function updateChampSelect(data) {
     // Keep status visible, build card will show when matchup is ready
 }
 
+// Format role name for display
+function formatRole(role) {
+    const roleMap = {
+        'utility': 'Support',
+        'middle': 'Mid',
+        'bottom': 'ADC',
+        'jungle': 'Jungle',
+        'top': 'Top'
+    };
+    return roleMap[role] || role;
+}
+
 // Update UI based on build data
 function updateBuild(data) {
     if (!data.hasBuild) {
@@ -63,6 +77,7 @@ function updateBuild(data) {
     buildCard.classList.remove('hidden');
     statusCard.classList.add('hidden');
 
+    buildRole.textContent = data.role ? formatRole(data.role) : '';
     winrateLabel.textContent = data.winRateLabel || 'Win Rate';
     buildWinrate.textContent = data.winRate;
 

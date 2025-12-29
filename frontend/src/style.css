@@ -164,6 +164,15 @@ body {
     padding: 8px 0;
 }
 
+.build-role {
+    font-size: 11px;
+    color: #c89b3c;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
 .build-matchup {
     display: flex;
     justify-content: space-between;
