@@ -25,16 +25,18 @@ type App struct {
 	lastFetchedChamp int
 	lastFetchedEnemy int
 	lastBanFetchKey  string
+	windowVisible    bool
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
-		lcuClient:  lcu.NewClient(),
-		wsClient:   lcu.NewWebSocketClient(),
-		champions:  lcu.NewChampionRegistry(),
-		uggFetcher: ugg.NewFetcher(),
-		stopPoll:   make(chan struct{}),
+		lcuClient:     lcu.NewClient(),
+		wsClient:      lcu.NewWebSocketClient(),
+		champions:     lcu.NewChampionRegistry(),
+		uggFetcher:    ugg.NewFetcher(),
+		stopPoll:      make(chan struct{}),
+		windowVisible: true,
 	}
 }
 
@@ -81,6 +83,9 @@ func (a *App) startup(ctx context.Context) {
 
 	// Start polling for League Client
 	go a.pollForLeagueClient()
+
+	// Register global hotkey (Ctrl+O to toggle visibility)
+	a.RegisterToggleHotkey()
 }
 
 // shutdown is called when the app is closing

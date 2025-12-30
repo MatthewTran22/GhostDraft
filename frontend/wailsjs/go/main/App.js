@@ -5,3 +5,11 @@
 export function GetConnectionStatus() {
   return window['go']['main']['App']['GetConnectionStatus']();
 }
+
+export function RegisterToggleHotkey() {
+  return window['go']['main']['App']['RegisterToggleHotkey']();
+}
+
+export function ToggleWindow() {
+  return window['go']['main']['App']['ToggleWindow']();
+}
