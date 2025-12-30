@@ -100,3 +100,10 @@ func (r *ItemRegistry) GetVersion() string {
 	defer r.mu.RUnlock()
 	return r.version
 }
+
+// GetIconURL returns the Data Dragon icon URL for an item
+func (r *ItemRegistry) GetIconURL(id int) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return fmt.Sprintf("https://ddragon.leagueoflegends.com/cdn/%s/img/item/%d.png", r.version, id)
+}

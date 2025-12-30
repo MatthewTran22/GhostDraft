@@ -211,18 +211,21 @@ func (f *Fetcher) parseChampionData(rawData map[string]json.RawMessage, champion
 		f.parseItems(statsData[3], &build.CoreItems)
 	}
 
+	// Parse situational items (index 5)
+	// Structure: [slot0Options, slot1Options, slot2Options, ...]
+	// Each slot: [[itemId, wins, games], ...]
+	if len(statsData) > 5 {
+		f.parseSituationalItems(statsData[5], build)
+	}
+
 	return build, nil
 }
 
 // parseItems extracts item IDs
+// Structure: [wins, games, [itemId1, itemId2, ...]]
 func (f *Fetcher) parseItems(data json.RawMessage, items *[]int) {
-	var itemData []json.RawMessage
-	if err := json.Unmarshal(data, &itemData); err != nil || len(itemData) == 0 {
-		return
-	}
-
 	var itemArray []json.RawMessage
-	if err := json.Unmarshal(itemData[0], &itemArray); err != nil || len(itemArray) < 3 {
+	if err := json.Unmarshal(data, &itemArray); err != nil || len(itemArray) < 3 {
 		return
 	}
 
@@ -232,4 +235,39 @@ func (f *Fetcher) parseItems(data json.RawMessage, items *[]int) {
 	}
 
 	*items = itemIDs
+}
+
+// parseSituationalItems extracts 4th/5th/6th item options
+// Structure: [slot0Options, slot1Options, slot2Options, consumables, ...]
+// Each slot: [[itemId, wins, games], ...]
+func (f *Fetcher) parseSituationalItems(data json.RawMessage, build *BuildData) {
+	var slots []json.RawMessage
+	if err := json.Unmarshal(data, &slots); err != nil || len(slots) < 3 {
+		return
+	}
+
+	// Slot 0 = 4th item options
+	build.FourthItemOptions = f.parseSlotOptions(slots[0], 3)
+	// Slot 1 = 5th item options
+	build.FifthItemOptions = f.parseSlotOptions(slots[1], 3)
+	// Slot 2 = 6th item options
+	build.SixthItemOptions = f.parseSlotOptions(slots[2], 3)
+}
+
+// parseSlotOptions extracts top N item IDs from a slot
+// Structure: [[itemId, wins, games], ...]
+func (f *Fetcher) parseSlotOptions(data json.RawMessage, limit int) []int {
+	var options [][]float64
+	if err := json.Unmarshal(data, &options); err != nil {
+		return nil
+	}
+
+	var items []int
+	for i, opt := range options {
+		if i >= limit || len(opt) < 1 {
+			break
+		}
+		items = append(items, int(opt[0]))
+	}
+	return items
 }

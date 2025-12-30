@@ -19,6 +19,7 @@ document.querySelector('#app').innerHTML = `
         <div class="tabs-container hidden" id="tabs-container">
             <div class="tabs-header">
                 <button class="tab-btn active" data-tab="matchup">Matchup</button>
+                <button class="tab-btn" data-tab="build">Build</button>
                 <button class="tab-btn" data-tab="teamcomp">Team Comp</button>
             </div>
 
@@ -39,6 +40,21 @@ document.querySelector('#app').innerHTML = `
                         <span class="winrate-label" id="winrate-label">Win Rate</span>
                         <span class="build-winrate" id="build-winrate"></span>
                     </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-build">
+                <div class="items-section" id="items-section">
+                    <div class="items-header">Starting Items</div>
+                    <div class="items-grid" id="starting-items"></div>
+                    <div class="items-header">Core Build</div>
+                    <div class="items-grid" id="core-items"></div>
+                    <div class="items-header">4th Item Options</div>
+                    <div class="items-grid" id="fourth-items"></div>
+                    <div class="items-header">5th Item Options</div>
+                    <div class="items-grid" id="fifth-items"></div>
+                    <div class="items-header">6th Item Options</div>
+                    <div class="items-grid" id="sixth-items"></div>
                 </div>
             </div>
 
@@ -79,6 +95,11 @@ const buildWinrate = document.getElementById('build-winrate');
 const winrateLabel = document.getElementById('winrate-label');
 const compWaiting = document.getElementById('comp-waiting');
 const compAnalysis = document.getElementById('comp-analysis');
+const startingItemsGrid = document.getElementById('starting-items');
+const coreItemsGrid = document.getElementById('core-items');
+const fourthItemsGrid = document.getElementById('fourth-items');
+const fifthItemsGrid = document.getElementById('fifth-items');
+const sixthItemsGrid = document.getElementById('sixth-items');
 const allyArchetype = document.getElementById('ally-archetype');
 const allyTags = document.getElementById('ally-tags');
 const allyDamage = document.getElementById('ally-damage');
@@ -232,6 +253,37 @@ function updateFullComp(data) {
     `;
 }
 
+// Update item build
+function updateItems(data) {
+    if (!data || !data.hasItems) {
+        startingItemsGrid.innerHTML = '<div class="items-empty">Select a champion...</div>';
+        coreItemsGrid.innerHTML = '';
+        fourthItemsGrid.innerHTML = '';
+        fifthItemsGrid.innerHTML = '';
+        sixthItemsGrid.innerHTML = '';
+        return;
+    }
+
+    // Helper to render item grid
+    const renderItems = (items, grid) => {
+        if (items && items.length > 0) {
+            grid.innerHTML = items.map(item => `
+                <div class="item-slot">
+                    <img class="item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name}" />
+                </div>
+            `).join('');
+        } else {
+            grid.innerHTML = '<div class="items-empty">No data</div>';
+        }
+    };
+
+    renderItems(data.startingItems, startingItemsGrid);
+    renderItems(data.coreItems, coreItemsGrid);
+    renderItems(data.fourthItems, fourthItemsGrid);
+    renderItems(data.fifthItems, fifthItemsGrid);
+    renderItems(data.sixthItems, sixthItemsGrid);
+}
+
 // Event listeners
 EventsOn('lcu:status', updateStatus);
 EventsOn('champselect:update', updateChampSelect);
@@ -239,6 +291,7 @@ EventsOn('build:update', updateBuild);
 EventsOn('bans:update', updateBans);
 EventsOn('teamcomp:update', updateTeamComp);
 EventsOn('fullcomp:update', updateFullComp);
+EventsOn('items:update', updateItems);
 
 // Get initial status
 GetConnectionStatus()

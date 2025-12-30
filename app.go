@@ -19,12 +19,14 @@ type App struct {
 	lcuClient        *lcu.Client
 	wsClient         *lcu.WebSocketClient
 	champions        *lcu.ChampionRegistry
+	items            *lcu.ItemRegistry
 	championDB       *data.ChampionDB
 	uggFetcher       *ugg.Fetcher
 	stopPoll         chan struct{}
 	lastFetchedChamp int
 	lastFetchedEnemy int
 	lastBanFetchKey  string
+	lastItemFetchKey string
 	windowVisible    bool
 }
 
@@ -34,6 +36,7 @@ func NewApp() *App {
 		lcuClient:     lcu.NewClient(),
 		wsClient:      lcu.NewWebSocketClient(),
 		champions:     lcu.NewChampionRegistry(),
+		items:         lcu.NewItemRegistry(),
 		uggFetcher:    ugg.NewFetcher(),
 		stopPoll:      make(chan struct{}),
 		windowVisible: true,
@@ -73,6 +76,11 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}()
 	go func() {
+		if err := a.items.Load(); err != nil {
+			fmt.Printf("Failed to load items: %v\n", err)
+		}
+	}()
+	go func() {
 		if err := a.uggFetcher.FetchPatch(); err != nil {
 			fmt.Printf("Failed to fetch U.GG patch: %v\n", err)
 		}
@@ -104,6 +112,7 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 		a.lastFetchedChamp = 0
 		a.lastFetchedEnemy = 0
 		a.lastBanFetchKey = ""
+		a.lastItemFetchKey = ""
 		runtime.EventsEmit(a.ctx, "champselect:update", map[string]interface{}{
 			"inChampSelect": false,
 		})
@@ -112,6 +121,9 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 		})
 		runtime.EventsEmit(a.ctx, "bans:update", map[string]interface{}{
 			"hasBans": false,
+		})
+		runtime.EventsEmit(a.ctx, "items:update", map[string]interface{}{
+			"hasItems": false,
 		})
 		fmt.Println("Exited Champion Select")
 		return
@@ -243,6 +255,13 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 			go a.fetchAndEmitRecommendedBans(championID, localPosition)
 		} else {
 			fmt.Printf("Skipping ban fetch - same key: %s\n", banKey)
+		}
+
+		// Also fetch item build when champion + role changes
+		itemKey := fmt.Sprintf("%d-%s", championID, localPosition)
+		if itemKey != a.lastItemFetchKey {
+			a.lastItemFetchKey = itemKey
+			go a.fetchAndEmitItems(championID, championName, localPosition)
 		}
 	}
 
@@ -397,6 +416,67 @@ func (a *App) fetchAndEmitRecommendedBans(championID int, role string) {
 		"championName": championName,
 		"role":         role,
 		"bans":         banList,
+	})
+}
+
+// fetchAndEmitItems fetches item build from U.GG and emits to frontend
+func (a *App) fetchAndEmitItems(championID int, championName string, role string) {
+	fmt.Printf("Fetching items for %s (%s)...\n", championName, role)
+
+	buildData, err := a.uggFetcher.FetchChampionData(championID, championName, role)
+	if err != nil {
+		fmt.Printf("Failed to fetch item build: %v\n", err)
+		runtime.EventsEmit(a.ctx, "items:update", map[string]interface{}{
+			"hasItems": false,
+		})
+		return
+	}
+
+	// Convert item IDs to names and icons
+	var startingItems []map[string]interface{}
+	for _, itemID := range buildData.StartingItems {
+		startingItems = append(startingItems, map[string]interface{}{
+			"id":      itemID,
+			"name":    a.items.GetName(itemID),
+			"iconURL": a.items.GetIconURL(itemID),
+		})
+	}
+
+	var coreItems []map[string]interface{}
+	for _, itemID := range buildData.CoreItems {
+		coreItems = append(coreItems, map[string]interface{}{
+			"id":      itemID,
+			"name":    a.items.GetName(itemID),
+			"iconURL": a.items.GetIconURL(itemID),
+		})
+	}
+
+	// Convert situational items
+	convertItems := func(ids []int) []map[string]interface{} {
+		var result []map[string]interface{}
+		for _, itemID := range ids {
+			result = append(result, map[string]interface{}{
+				"id":      itemID,
+				"name":    a.items.GetName(itemID),
+				"iconURL": a.items.GetIconURL(itemID),
+			})
+		}
+		return result
+	}
+
+	fmt.Printf("Items for %s: %d starting, %d core, %d/%d/%d situational\n",
+		championName, len(startingItems), len(coreItems),
+		len(buildData.FourthItemOptions), len(buildData.FifthItemOptions), len(buildData.SixthItemOptions))
+
+	runtime.EventsEmit(a.ctx, "items:update", map[string]interface{}{
+		"hasItems":      true,
+		"championName":  championName,
+		"role":          role,
+		"startingItems": startingItems,
+		"coreItems":     coreItems,
+		"fourthItems":   convertItems(buildData.FourthItemOptions),
+		"fifthItems":    convertItems(buildData.FifthItemOptions),
+		"sixthItems":    convertItems(buildData.SixthItemOptions),
 	})
 }
 
