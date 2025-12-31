@@ -95,15 +95,15 @@ func (a *App) startup(ctx context.Context) {
 		// Check for updates from remote manifest
 		manifestURL := os.Getenv("STATS_MANIFEST_URL")
 		if manifestURL == "" {
-			manifestURL = "" // TODO: Set default URL when hosting is configured
+			manifestURL = data.DefaultManifestURL
 		}
 
-		if manifestURL != "" {
-			if err := statsDB.CheckForUpdates(manifestURL); err != nil {
-				fmt.Printf("Failed to check for stats updates: %v (using cached data)\n", err)
-			}
-		} else if !statsDB.HasData() {
-			fmt.Println("No stats data available and no manifest URL configured")
+		if err := statsDB.CheckForUpdates(manifestURL); err != nil {
+			fmt.Printf("Failed to check for stats updates: %v (using cached data)\n", err)
+		}
+
+		if !statsDB.HasData() {
+			fmt.Println("No stats data available")
 			return
 		}
 
@@ -988,4 +988,60 @@ func (a *App) GetConnectionStatus() map[string]interface{} {
 		"connected": false,
 		"message":   "Waiting for League...",
 	}
+}
+
+// MetaChampion represents a champion in the meta list
+type MetaChampion struct {
+	ChampionID   int     `json:"championId"`
+	ChampionName string  `json:"championName"`
+	IconURL      string  `json:"iconURL"`
+	WinRate      float64 `json:"winRate"`
+	PickRate     float64 `json:"pickRate"`
+	Games        int     `json:"games"`
+}
+
+// MetaData represents the top champions for all roles
+type MetaData struct {
+	Patch   string                   `json:"patch"`
+	HasData bool                     `json:"hasData"`
+	Roles   map[string][]MetaChampion `json:"roles"`
+}
+
+// GetMetaChampions returns the top 5 champions by win rate for each role
+func (a *App) GetMetaChampions() MetaData {
+	result := MetaData{
+		HasData: false,
+		Roles:   make(map[string][]MetaChampion),
+	}
+
+	if a.statsProvider == nil {
+		return result
+	}
+
+	result.Patch = a.statsProvider.GetPatch()
+
+	roleData, err := a.statsProvider.FetchAllRolesTopChampions(5)
+	if err != nil {
+		return result
+	}
+
+	for role, champs := range roleData {
+		var metaChamps []MetaChampion
+		for _, c := range champs {
+			name := a.champions.GetName(c.ChampionID)
+			icon := a.champions.GetIconURL(c.ChampionID)
+			metaChamps = append(metaChamps, MetaChampion{
+				ChampionID:   c.ChampionID,
+				ChampionName: name,
+				IconURL:      icon,
+				WinRate:      c.WinRate,
+				PickRate:     c.PickRate,
+				Games:        c.Matches,
+			})
+		}
+		result.Roles[role] = metaChamps
+	}
+
+	result.HasData = true
+	return result
 }

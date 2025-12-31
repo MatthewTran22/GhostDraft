@@ -3,7 +3,8 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,15 +16,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/joho/godotenv"
 )
 
 // CLI flags
 var (
-	outputDir = flag.String("output-dir", "", "Directory to output data.json and manifest.json")
-	baseURL   = flag.String("base-url", "", "Base URL for manifest.dataUrl (e.g., https://cdn.example.com/data)")
-	noDB      = flag.Bool("no-db", false, "Skip PostgreSQL writes, only export JSON")
+	outputDir = flag.String("output-dir", "./export", "Directory to output data.json")
 )
 
 const DDRAGON_VERSION = "14.24.1"
@@ -33,9 +31,9 @@ var completedItems map[int]bool
 
 // DDragonItem represents an item from Data Dragon
 type DDragonItem struct {
-	Name string `json:"name"`
-	Into []int  `json:"into,omitempty"` // Items this builds into
-	From []int  `json:"from,omitempty"` // Items this is built from
+	Name string   `json:"name"`
+	Into []string `json:"into,omitempty"` // Items this builds into (as string IDs)
+	From []string `json:"from,omitempty"` // Items this is built from (as string IDs)
 	Gold struct {
 		Total       int  `json:"total"`
 		Purchasable bool `json:"purchasable"`
@@ -158,10 +156,10 @@ type MatchupStats struct {
 
 // JSON export types
 type DataExport struct {
-	Patch            string              `json:"patch"`
-	GeneratedAt      string              `json:"generatedAt"`
-	ChampionStats    []ChampionStatJSON  `json:"championStats"`
-	ChampionItems    []ChampionItemJSON  `json:"championItems"`
+	Patch            string                `json:"patch"`
+	GeneratedAt      string                `json:"generatedAt"`
+	ChampionStats    []ChampionStatJSON    `json:"championStats"`
+	ChampionItems    []ChampionItemJSON    `json:"championItems"`
 	ChampionMatchups []ChampionMatchupJSON `json:"championMatchups"`
 }
 
@@ -189,12 +187,6 @@ type ChampionMatchupJSON struct {
 	EnemyChampionID int    `json:"enemyChampionId"`
 	Wins            int    `json:"wins"`
 	Matches         int    `json:"matches"`
-}
-
-type Manifest struct {
-	Patch       string `json:"patch"`
-	DataURL     string `json:"dataUrl"`
-	GeneratedAt string `json:"generatedAt"`
 }
 
 func main() {
@@ -227,29 +219,6 @@ func main() {
 	// Load completed items from Data Dragon
 	if err := loadCompletedItems(); err != nil {
 		log.Fatalf("Failed to load item data: %v", err)
-	}
-
-	ctx := context.Background()
-	var conn *pgx.Conn
-
-	// Connect to PostgreSQL only if not skipping DB
-	if !*noDB {
-		dbURL := os.Getenv("DATABASE_URL")
-		if dbURL == "" {
-			dbURL = "postgres://analyzer:analyzer123@localhost:5432/lol_matches?sslmode=disable"
-		}
-
-		var err error
-		conn, err = pgx.Connect(ctx, dbURL)
-		if err != nil {
-			log.Fatalf("Failed to connect to database: %v", err)
-		}
-		defer conn.Close(ctx)
-
-		// Create tables if they don't exist
-		if err := createTables(ctx, conn); err != nil {
-			log.Fatalf("Failed to create tables: %v", err)
-		}
 	}
 
 	// Scan warm directory for .jsonl files
@@ -324,44 +293,12 @@ func main() {
 	fmt.Printf("Matchup stats: %d\n", len(allMatchupStats))
 	fmt.Printf("Detected patch: %s\n", detectedPatch)
 
-	// Export to JSON if output-dir is specified
-	if *outputDir != "" {
-		fmt.Printf("\n=== Exporting JSON ===\n")
-		if err := exportToJSON(*outputDir, detectedPatch, allChampionStats, allItemStats, allMatchupStats); err != nil {
-			log.Fatalf("Failed to export JSON: %v", err)
-		}
-		if err := exportManifest(*outputDir, *baseURL, detectedPatch); err != nil {
-			log.Fatalf("Failed to export manifest: %v", err)
-		}
-		fmt.Printf("Exported to: %s\n", *outputDir)
+	// Export to JSON
+	fmt.Printf("\n=== Exporting JSON ===\n")
+	if err := exportToJSON(*outputDir, detectedPatch, allChampionStats, allItemStats, allMatchupStats); err != nil {
+		log.Fatalf("Failed to export JSON: %v", err)
 	}
-
-	// Write to PostgreSQL if not skipping
-	if !*noDB && conn != nil {
-		fmt.Printf("\n=== Writing to PostgreSQL ===\n")
-		tx, err := conn.Begin(ctx)
-		if err != nil {
-			log.Fatalf("Failed to begin transaction: %v", err)
-		}
-		defer tx.Rollback(ctx)
-
-		if err := upsertChampionStats(ctx, tx, allChampionStats); err != nil {
-			log.Fatalf("Champion stats upsert failed: %v", err)
-		}
-
-		if err := upsertItemStats(ctx, tx, allItemStats); err != nil {
-			log.Fatalf("Item stats upsert failed: %v", err)
-		}
-
-		if err := upsertMatchupStats(ctx, tx, allMatchupStats); err != nil {
-			log.Fatalf("Matchup stats upsert failed: %v", err)
-		}
-
-		if err := tx.Commit(ctx); err != nil {
-			log.Fatalf("Transaction commit failed: %v", err)
-		}
-		fmt.Println("Successfully wrote to PostgreSQL")
-	}
+	fmt.Printf("Exported to: %s\n", *outputDir)
 
 	// Archive files after successful processing
 	for _, filePath := range files {
@@ -371,41 +308,6 @@ func main() {
 	}
 
 	fmt.Println("\n=== Reducer Complete ===")
-}
-
-func createTables(ctx context.Context, conn *pgx.Conn) error {
-	schema := `
-		CREATE TABLE IF NOT EXISTS champion_stats (
-			patch VARCHAR(10) NOT NULL,
-			champion_id INT NOT NULL,
-			team_position VARCHAR(20) NOT NULL,
-			wins INT NOT NULL DEFAULT 0,
-			matches INT NOT NULL DEFAULT 0,
-			PRIMARY KEY (patch, champion_id, team_position)
-		);
-
-		CREATE TABLE IF NOT EXISTS champion_items (
-			patch VARCHAR(10) NOT NULL,
-			champion_id INT NOT NULL,
-			team_position VARCHAR(20) NOT NULL,
-			item_id INT NOT NULL,
-			wins INT NOT NULL DEFAULT 0,
-			matches INT NOT NULL DEFAULT 0,
-			PRIMARY KEY (patch, champion_id, team_position, item_id)
-		);
-
-		CREATE TABLE IF NOT EXISTS champion_matchups (
-			patch VARCHAR(10) NOT NULL,
-			champion_id INT NOT NULL,
-			team_position VARCHAR(20) NOT NULL,
-			enemy_champion_id INT NOT NULL,
-			wins INT NOT NULL DEFAULT 0,
-			matches INT NOT NULL DEFAULT 0,
-			PRIMARY KEY (patch, champion_id, team_position, enemy_champion_id)
-		);
-	`
-	_, err := conn.Exec(ctx, schema)
-	return err
 }
 
 func aggregateFile(filePath string) (map[ChampionStatsKey]*ChampionStats, map[ItemStatsKey]*ItemStats, map[MatchupStatsKey]*MatchupStats, string, error) {
@@ -577,98 +479,6 @@ func deduplicateItems(items ...int) []int {
 	return result
 }
 
-func upsertChampionStats(ctx context.Context, tx pgx.Tx, stats map[ChampionStatsKey]*ChampionStats) error {
-	if len(stats) == 0 {
-		return nil
-	}
-
-	// Use COPY for batch insert, then handle conflicts
-	// Actually, let's use batch exec with prepared-like approach
-	batch := &pgx.Batch{}
-
-	for key, val := range stats {
-		batch.Queue(`
-			INSERT INTO champion_stats (patch, champion_id, team_position, wins, matches)
-			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (patch, champion_id, team_position)
-			DO UPDATE SET
-				wins = champion_stats.wins + EXCLUDED.wins,
-				matches = champion_stats.matches + EXCLUDED.matches
-		`, key.Patch, key.ChampionID, key.TeamPosition, val.Wins, val.Matches)
-	}
-
-	br := tx.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for range stats {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func upsertItemStats(ctx context.Context, tx pgx.Tx, stats map[ItemStatsKey]*ItemStats) error {
-	if len(stats) == 0 {
-		return nil
-	}
-
-	batch := &pgx.Batch{}
-
-	for key, val := range stats {
-		batch.Queue(`
-			INSERT INTO champion_items (patch, champion_id, team_position, item_id, wins, matches)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (patch, champion_id, team_position, item_id)
-			DO UPDATE SET
-				wins = champion_items.wins + EXCLUDED.wins,
-				matches = champion_items.matches + EXCLUDED.matches
-		`, key.Patch, key.ChampionID, key.TeamPosition, key.ItemID, val.Wins, val.Matches)
-	}
-
-	br := tx.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for range stats {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func upsertMatchupStats(ctx context.Context, tx pgx.Tx, stats map[MatchupStatsKey]*MatchupStats) error {
-	if len(stats) == 0 {
-		return nil
-	}
-
-	batch := &pgx.Batch{}
-
-	for key, val := range stats {
-		batch.Queue(`
-			INSERT INTO champion_matchups (patch, champion_id, team_position, enemy_champion_id, wins, matches)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (patch, champion_id, team_position, enemy_champion_id)
-			DO UPDATE SET
-				wins = champion_matchups.wins + EXCLUDED.wins,
-				matches = champion_matchups.matches + EXCLUDED.matches
-		`, key.Patch, key.ChampionID, key.TeamPosition, key.EnemyChampionID, val.Wins, val.Matches)
-	}
-
-	br := tx.SendBatch(ctx, batch)
-	defer br.Close()
-
-	for range stats {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func archiveFile(srcPath, coldDir string) error {
 	// Open source file
 	src, err := os.Open(srcPath)
@@ -771,44 +581,20 @@ func exportToJSON(outputDir, patch string,
 	}
 	defer dataFile.Close()
 
-	encoder := json.NewEncoder(dataFile)
+	// Write to file and compute SHA256 simultaneously
+	hasher := sha256.New()
+	multiWriter := io.MultiWriter(dataFile, hasher)
+
+	encoder := json.NewEncoder(multiWriter)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(export); err != nil {
 		return fmt.Errorf("failed to write data.json: %w", err)
 	}
 
+	dataSha256 := hex.EncodeToString(hasher.Sum(nil))
+
 	fmt.Printf("  Wrote data.json: %d champion stats, %d item stats, %d matchup stats\n",
 		len(champStatsJSON), len(itemStatsJSON), len(matchupStatsJSON))
-	return nil
-}
-
-// exportManifest creates manifest.json for version checking
-func exportManifest(outputDir, baseURL, patch string) error {
-	dataURL := baseURL
-	if dataURL != "" && !strings.HasSuffix(dataURL, "/") {
-		dataURL += "/"
-	}
-	dataURL += "data.json"
-
-	manifest := Manifest{
-		Patch:       patch,
-		DataURL:     dataURL,
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	manifestPath := filepath.Join(outputDir, "manifest.json")
-	manifestFile, err := os.Create(manifestPath)
-	if err != nil {
-		return fmt.Errorf("failed to create manifest.json: %w", err)
-	}
-	defer manifestFile.Close()
-
-	encoder := json.NewEncoder(manifestFile)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(manifest); err != nil {
-		return fmt.Errorf("failed to write manifest.json: %w", err)
-	}
-
-	fmt.Printf("  Wrote manifest.json: patch=%s, dataUrl=%s\n", patch, dataURL)
+	fmt.Printf("  SHA256: %s\n", dataSha256)
 	return nil
 }

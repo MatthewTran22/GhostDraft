@@ -6,6 +6,10 @@ export function GetConnectionStatus() {
   return window['go']['main']['App']['GetConnectionStatus']();
 }
 
+export function GetMetaChampions() {
+  return window['go']['main']['App']['GetMetaChampions']();
+}
+
 export function RegisterToggleHotkey() {
   return window['go']['main']['App']['RegisterToggleHotkey']();
 }

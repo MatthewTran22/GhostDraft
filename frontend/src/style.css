@@ -628,3 +628,162 @@ body {
 .build-content {
     overflow-y: auto;
 }
+
+/* Meta Tab */
+.meta-header {
+    font-size: 16px;
+    font-weight: 700;
+    color: #c89b3c;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+.meta-content {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.meta-loading, .meta-empty {
+    text-align: center;
+    padding: 30px 10px;
+    color: #888;
+    font-size: 14px;
+}
+
+.meta-role {
+    background: #1a1a1a;
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+
+.meta-role-header {
+    font-size: 14px;
+    font-weight: 700;
+    color: #c89b3c;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #333;
+}
+
+.meta-role-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.meta-champ-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    background: #252525;
+    border-radius: 4px;
+    gap: 10px;
+}
+
+.meta-rank {
+    font-size: 14px;
+    font-weight: 700;
+    color: #666;
+    width: 18px;
+}
+
+.meta-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    border: 1px solid #333;
+}
+
+.meta-name {
+    flex: 1;
+    font-size: 14px;
+    color: #e0e0e0;
+}
+
+.meta-header-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    gap: 10px;
+    border-bottom: 1px solid #333;
+    margin-bottom: 4px;
+}
+
+.meta-rank-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: #aaa;
+    width: 18px;
+    text-align: center;
+}
+
+.meta-champ-header {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 600;
+    color: #aaa;
+    padding-left: 42px;
+}
+
+.meta-pr-header,
+.meta-wr-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: #aaa;
+    min-width: 50px;
+    text-align: right;
+}
+
+.meta-pr {
+    font-size: 13px;
+    font-weight: 500;
+    color: #5c9fd4;
+    min-width: 50px;
+    text-align: right;
+}
+
+.meta-wr {
+    font-size: 13px;
+    font-weight: 600;
+    min-width: 50px;
+    text-align: right;
+}
+
+.meta-wr.winning {
+    color: #4caf50;
+}
+
+/* Meta Role Tabs */
+.meta-role-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.meta-role-tab {
+    flex: 1;
+    min-width: 50px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 10px 8px;
+    color: #888;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+}
+
+.meta-role-tab:hover {
+    border-color: #c89b3c;
+    color: #e0e0e0;
+}
+
+.meta-role-tab.active {
+    background: rgba(200, 155, 60, 0.15);
+    border-color: #c89b3c;
+    color: #c89b3c;
+}

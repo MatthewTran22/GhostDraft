@@ -1,7 +1,9 @@
 package data
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// DefaultManifestURL is the default URL for fetching stats data
+const DefaultManifestURL = "https://cdn.jsdelivr.net/gh/MatthewTran22/LoLOverlay-Data@main/manifest.json"
+
 // StatsDB manages the stats database with remote update capability
 type StatsDB struct {
 	db           *sql.DB
@@ -21,9 +26,10 @@ type StatsDB struct {
 
 // Manifest represents the remote manifest.json structure
 type Manifest struct {
-	Patch       string `json:"patch"`
-	DataURL     string `json:"dataUrl"`
-	GeneratedAt string `json:"generatedAt"`
+	Version     string `json:"version"`
+	DataURL     string `json:"data_url"`
+	DataSha256  string `json:"data_sha256"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // DataExport represents the data.json structure from the reducer
@@ -184,27 +190,28 @@ func (s *StatsDB) CheckForUpdates(manifestURL string) error {
 		return fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	fmt.Printf("[Stats] Remote patch: %s, Local patch: %s\n", manifest.Patch, s.currentPatch)
+	fmt.Printf("[Stats] Remote version: %s, Local patch: %s\n", manifest.Version, s.currentPatch)
 
-	// Compare versions (simple string comparison works for semantic versions like "14.24")
-	if manifest.Patch <= s.currentPatch {
+	// Compare versions (simple string comparison works for semantic versions like "14.24.1")
+	if manifest.Version != "" && manifest.Version <= s.currentPatch {
 		fmt.Println("[Stats] Local data is up to date")
 		return nil
 	}
 
 	// Download and import new data
 	fmt.Printf("[Stats] Downloading new data from: %s\n", manifest.DataURL)
-	if err := s.downloadAndImport(manifest.DataURL); err != nil {
+	if err := s.downloadAndImport(manifest.DataURL, manifest.DataSha256, manifest.Version); err != nil {
 		return fmt.Errorf("failed to download and import data: %w", err)
 	}
 
-	s.currentPatch = manifest.Patch
-	fmt.Printf("[Stats] Updated to patch: %s\n", manifest.Patch)
+	// Reload current patch from database after import
+	s.loadCurrentPatch()
+	fmt.Printf("[Stats] Updated to version: %s\n", s.currentPatch)
 	return nil
 }
 
 // downloadAndImport downloads data.json and imports it into SQLite
-func (s *StatsDB) downloadAndImport(dataURL string) error {
+func (s *StatsDB) downloadAndImport(dataURL, expectedSha256, manifestVersion string) error {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(dataURL)
 	if err != nil {
@@ -222,31 +229,43 @@ func (s *StatsDB) downloadAndImport(dataURL string) error {
 		return fmt.Errorf("failed to read data: %w", err)
 	}
 
+	// Verify SHA256 hash if provided
+	if expectedSha256 != "" {
+		hasher := sha256.New()
+		hasher.Write(body)
+		actualSha256 := hex.EncodeToString(hasher.Sum(nil))
+
+		if actualSha256 != expectedSha256 {
+			return fmt.Errorf("SHA256 mismatch: expected %s, got %s", expectedSha256, actualSha256)
+		}
+		fmt.Println("[Stats] SHA256 verified successfully")
+	}
+
 	var data DataExport
 	if err := json.Unmarshal(body, &data); err != nil {
 		return fmt.Errorf("failed to parse data: %w", err)
 	}
 
-	// Import into database
-	return s.ImportData(&data)
+	// Use manifest version for tracking updates
+	return s.ImportData(&data, manifestVersion)
 }
 
 // ImportData bulk inserts data into SQLite using a single transaction
-func (s *StatsDB) ImportData(data *DataExport) error {
+func (s *StatsDB) ImportData(data *DataExport, version string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback() // Safe to call even after Commit()
 
-	// Clear existing data for this patch
-	if _, err := tx.Exec("DELETE FROM champion_stats WHERE patch = ?", data.Patch); err != nil {
+	// Clear ALL existing data - this is a full refresh
+	if _, err := tx.Exec("DELETE FROM champion_stats"); err != nil {
 		return fmt.Errorf("failed to clear champion_stats: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM champion_items WHERE patch = ?", data.Patch); err != nil {
+	if _, err := tx.Exec("DELETE FROM champion_items"); err != nil {
 		return fmt.Errorf("failed to clear champion_items: %w", err)
 	}
-	if _, err := tx.Exec("DELETE FROM champion_matchups WHERE patch = ?", data.Patch); err != nil {
+	if _, err := tx.Exec("DELETE FROM champion_matchups"); err != nil {
 		return fmt.Errorf("failed to clear champion_matchups: %w", err)
 	}
 
@@ -298,11 +317,11 @@ func (s *StatsDB) ImportData(data *DataExport) error {
 		}
 	}
 
-	// Update version
+	// Update version - use manifest version for tracking updates
 	if _, err := tx.Exec(`
 		INSERT OR REPLACE INTO data_version (id, patch, updated_at)
 		VALUES (1, ?, datetime('now'))
-	`, data.Patch); err != nil {
+	`, version); err != nil {
 		return fmt.Errorf("failed to update version: %w", err)
 	}
 

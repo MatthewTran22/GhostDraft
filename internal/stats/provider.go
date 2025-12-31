@@ -58,6 +58,15 @@ type MatchupStat struct {
 	WinRate         float64
 }
 
+// ChampionWinRate holds champion win rate data for meta display
+type ChampionWinRate struct {
+	ChampionID int
+	Wins       int
+	Matches    int
+	WinRate    float64
+	PickRate   float64
+}
+
 // NewProvider creates a new stats provider from a StatsDB
 func NewProvider(statsDB *data.StatsDB) (*Provider, error) {
 	return &Provider{
@@ -116,32 +125,25 @@ func roleToPosition(role string) string {
 func (p *Provider) FetchChampionData(championID int, championName string, role string) (*BuildData, error) {
 	position := roleToPosition(role)
 
-	// Get total games for this champion/position to calculate pick rates
+	// Get total games for this champion/position (aggregate across all patches)
 	var totalGames int
 	err := p.db.QueryRow(`
-		SELECT COALESCE(matches, 0) FROM champion_stats
-		WHERE patch = ? AND champion_id = ? AND team_position = ?
-	`, p.currentPatch, championID, position).Scan(&totalGames)
+		SELECT COALESCE(SUM(matches), 0) FROM champion_stats
+		WHERE champion_id = ? AND team_position = ?
+	`, championID, position).Scan(&totalGames)
 
 	if err != nil || totalGames == 0 {
-		// Try without patch filter if no data for current patch
-		err = p.db.QueryRow(`
-			SELECT COALESCE(SUM(matches), 0) FROM champion_stats
-			WHERE champion_id = ? AND team_position = ?
-		`, championID, position).Scan(&totalGames)
-
-		if err != nil || totalGames == 0 {
-			return nil, fmt.Errorf("no data for champion %d in position %s", championID, position)
-		}
+		return nil, fmt.Errorf("no data for champion %d in position %s", championID, position)
 	}
 
-	// Get item stats
+	// Get item stats (aggregate across all patches)
 	rows, err := p.db.Query(`
-		SELECT item_id, wins, matches
+		SELECT item_id, SUM(wins) as wins, SUM(matches) as matches
 		FROM champion_items
-		WHERE patch = ? AND champion_id = ? AND team_position = ?
-		ORDER BY matches DESC
-	`, p.currentPatch, championID, position)
+		WHERE champion_id = ? AND team_position = ?
+		GROUP BY item_id
+		ORDER BY SUM(matches) DESC
+	`, championID, position)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query items: %w", err)
@@ -294,24 +296,15 @@ func (p *Provider) FetchMatchup(championID int, enemyChampionID int, role string
 	var m MatchupStat
 	m.EnemyChampionID = enemyChampionID
 
-	// Try current patch first
+	// Aggregate across all patches
 	err := p.db.QueryRow(`
-		SELECT wins, matches
+		SELECT COALESCE(SUM(wins), 0), COALESCE(SUM(matches), 0)
 		FROM champion_matchups
-		WHERE patch = ? AND champion_id = ? AND team_position = ? AND enemy_champion_id = ?
-	`, p.currentPatch, championID, position, enemyChampionID).Scan(&m.Wins, &m.Matches)
+		WHERE champion_id = ? AND team_position = ? AND enemy_champion_id = ?
+	`, championID, position, enemyChampionID).Scan(&m.Wins, &m.Matches)
 
 	if err != nil || m.Matches == 0 {
-		// Try without patch filter
-		err = p.db.QueryRow(`
-			SELECT SUM(wins), SUM(matches)
-			FROM champion_matchups
-			WHERE champion_id = ? AND team_position = ? AND enemy_champion_id = ?
-		`, championID, position, enemyChampionID).Scan(&m.Wins, &m.Matches)
-
-		if err != nil || m.Matches == 0 {
-			return nil, fmt.Errorf("no matchup data for %d vs %d", championID, enemyChampionID)
-		}
+		return nil, fmt.Errorf("no matchup data for %d vs %d", championID, enemyChampionID)
 	}
 
 	m.WinRate = float64(m.Wins) / float64(m.Matches) * 100
@@ -322,26 +315,17 @@ func (p *Provider) FetchMatchup(championID int, enemyChampionID int, role string
 func (p *Provider) FetchAllMatchups(championID int, role string) ([]MatchupStat, error) {
 	position := roleToPosition(role)
 
+	// Aggregate across all patches
 	rows, err := p.db.Query(`
-		SELECT enemy_champion_id, wins, matches
+		SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
 		FROM champion_matchups
-		WHERE patch = ? AND champion_id = ? AND team_position = ?
-		ORDER BY matches DESC
-	`, p.currentPatch, championID, position)
+		WHERE champion_id = ? AND team_position = ?
+		GROUP BY enemy_champion_id
+		ORDER BY SUM(matches) DESC
+	`, championID, position)
 
 	if err != nil {
-		// Try without patch filter
-		rows, err = p.db.Query(`
-			SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
-			FROM champion_matchups
-			WHERE champion_id = ? AND team_position = ?
-			GROUP BY enemy_champion_id
-			ORDER BY SUM(matches) DESC
-		`, championID, position)
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to query matchups: %w", err)
-		}
+		return nil, fmt.Errorf("failed to query matchups: %w", err)
 	}
 	defer rows.Close()
 
@@ -370,30 +354,19 @@ func (p *Provider) FetchCounterMatchups(championID int, role string, limit int) 
 	}
 
 	// Query matchups ordered by lowest win rate (hardest counters first)
-	// Only include matchups with at least 10 games for statistical significance
+	// Aggregate across all patches, include matchups with at least 1 game
 	rows, err := p.db.Query(`
-		SELECT enemy_champion_id, wins, matches
+		SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
 		FROM champion_matchups
-		WHERE patch = ? AND champion_id = ? AND team_position = ? AND matches >= 10
-		ORDER BY (CAST(wins AS REAL) / CAST(matches AS REAL)) ASC
+		WHERE champion_id = ? AND team_position = ?
+		GROUP BY enemy_champion_id
+		HAVING SUM(matches) >= 1
+		ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) ASC
 		LIMIT ?
-	`, p.currentPatch, championID, position, limit)
+	`, championID, position, limit)
 
 	if err != nil {
-		// Try without patch filter
-		rows, err = p.db.Query(`
-			SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
-			FROM champion_matchups
-			WHERE champion_id = ? AND team_position = ?
-			GROUP BY enemy_champion_id
-			HAVING SUM(matches) >= 10
-			ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) ASC
-			LIMIT ?
-		`, championID, position, limit)
-
-		if err != nil {
-			return nil, fmt.Errorf("failed to query matchups: %w", err)
-		}
+		return nil, fmt.Errorf("failed to query matchups: %w", err)
 	}
 	defer rows.Close()
 
@@ -410,4 +383,74 @@ func (p *Provider) FetchCounterMatchups(championID int, role string, limit int) 
 	}
 
 	return matchups, nil
+}
+
+// FetchTopChampionsByRole returns the top N champions by win rate for a given role
+func (p *Provider) FetchTopChampionsByRole(role string, limit int) ([]ChampionWinRate, error) {
+	position := roleToPosition(role)
+
+	if limit <= 0 {
+		limit = 5
+	}
+
+	// Get total games for this position to calculate pick rate
+	var totalGames int
+	err := p.db.QueryRow(`
+		SELECT COALESCE(SUM(matches), 0) FROM champion_stats
+		WHERE team_position = ?
+	`, position).Scan(&totalGames)
+	if err != nil {
+		totalGames = 0
+	}
+
+	// Query champions ordered by highest win rate
+	// Aggregate across all patches, include champions with at least 100 games
+	rows, err := p.db.Query(`
+		SELECT champion_id, SUM(wins) as wins, SUM(matches) as matches
+		FROM champion_stats
+		WHERE team_position = ?
+		GROUP BY champion_id
+		HAVING SUM(matches) >= 100
+		ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) DESC
+		LIMIT ?
+	`, position, limit)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query top champions: %w", err)
+	}
+	defer rows.Close()
+
+	var champions []ChampionWinRate
+	for rows.Next() {
+		var c ChampionWinRate
+		if err := rows.Scan(&c.ChampionID, &c.Wins, &c.Matches); err != nil {
+			continue
+		}
+		if c.Matches > 0 {
+			c.WinRate = float64(c.Wins) / float64(c.Matches) * 100
+			if totalGames > 0 {
+				c.PickRate = float64(c.Matches) / float64(totalGames) * 100
+			}
+		}
+		champions = append(champions, c)
+	}
+
+	return champions, nil
+}
+
+// FetchAllRolesTopChampions returns top N champions for all 5 roles
+func (p *Provider) FetchAllRolesTopChampions(limit int) (map[string][]ChampionWinRate, error) {
+	roles := []string{"top", "jungle", "middle", "bottom", "utility"}
+	result := make(map[string][]ChampionWinRate)
+
+	for _, role := range roles {
+		champs, err := p.FetchTopChampionsByRole(role, limit)
+		if err != nil {
+			result[role] = []ChampionWinRate{}
+			continue
+		}
+		result[role] = champs
+	}
+
+	return result, nil
 }

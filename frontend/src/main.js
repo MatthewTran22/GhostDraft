@@ -1,5 +1,5 @@
 import './style.css';
-import { GetConnectionStatus } from '../wailsjs/go/main/App';
+import { GetConnectionStatus, GetMetaChampions } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 // Initial HTML structure
@@ -21,6 +21,7 @@ document.querySelector('#app').innerHTML = `
                 <button class="tab-btn active" data-tab="matchup">Matchup</button>
                 <button class="tab-btn" data-tab="build">Build</button>
                 <button class="tab-btn" data-tab="teamcomp">Team Comp</button>
+                <button class="tab-btn" data-tab="meta">Meta</button>
             </div>
 
             <div class="tab-content active" id="tab-matchup">
@@ -65,6 +66,13 @@ document.querySelector('#app').innerHTML = `
                     </div>
                 </div>
             </div>
+
+            <div class="tab-content" id="tab-meta">
+                <div class="meta-header" id="meta-header">Top Champions by Win Rate</div>
+                <div class="meta-content" id="meta-content">
+                    <div class="meta-loading">Loading meta data...</div>
+                </div>
+            </div>
         </div>
     </div>
 `;
@@ -93,6 +101,8 @@ const allyDamage = document.getElementById('ally-damage');
 const enemyArchetype = document.getElementById('enemy-archetype');
 const enemyTags = document.getElementById('enemy-tags');
 const enemyDamage = document.getElementById('enemy-damage');
+const metaHeader = document.getElementById('meta-header');
+const metaContent = document.getElementById('meta-content');
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -103,8 +113,126 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         // Update active content
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+
+        // Load meta data when meta tab is clicked
+        if (btn.dataset.tab === 'meta') {
+            loadMetaData();
+        }
     });
 });
+
+// Meta data loaded flag
+let metaDataLoaded = false;
+let metaRetryCount = 0;
+let currentMetaData = null;
+let currentMetaRole = 'top';
+
+const roleOrder = ['top', 'jungle', 'middle', 'bottom', 'utility'];
+const roleNames = {
+    'top': 'Top',
+    'jungle': 'Jungle',
+    'middle': 'Mid',
+    'bottom': 'ADC',
+    'utility': 'Support'
+};
+
+// Render meta role tabs
+function renderMetaRoleTabs() {
+    return `
+        <div class="meta-role-tabs">
+            ${roleOrder.map(role => `
+                <button class="meta-role-tab ${role === currentMetaRole ? 'active' : ''}" data-role="${role}">
+                    ${roleNames[role]}
+                </button>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Render champions for a specific role
+function renderMetaRoleContent(role) {
+    if (!currentMetaData || !currentMetaData.roles[role]) {
+        return '<div class="meta-empty">No data for this role</div>';
+    }
+
+    const champs = currentMetaData.roles[role];
+    if (champs.length === 0) {
+        return '<div class="meta-empty">No champions found</div>';
+    }
+
+    return `
+        <div class="meta-role-list">
+            <div class="meta-header-row">
+                <span class="meta-rank-header">#</span>
+                <span class="meta-champ-header">Champion</span>
+                <span class="meta-pr-header">Pick %</span>
+                <span class="meta-wr-header">Win %</span>
+            </div>
+            ${champs.map((c, idx) => `
+                <div class="meta-champ-row">
+                    <span class="meta-rank">${idx + 1}</span>
+                    <img class="meta-icon" src="${c.iconURL}" alt="${c.championName}" />
+                    <span class="meta-name">${c.championName}</span>
+                    <span class="meta-pr">${c.pickRate.toFixed(1)}%</span>
+                    <span class="meta-wr winning">${c.winRate.toFixed(1)}%</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+// Setup meta role tab click handlers
+function setupMetaRoleTabHandlers() {
+    document.querySelectorAll('.meta-role-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            currentMetaRole = tab.dataset.role;
+            // Update active state
+            document.querySelectorAll('.meta-role-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            // Update content
+            document.getElementById('meta-role-content').innerHTML = renderMetaRoleContent(currentMetaRole);
+        });
+    });
+}
+
+// Load and display meta champions
+function loadMetaData() {
+    if (metaDataLoaded) return;
+
+    console.log('Loading meta data...');
+    GetMetaChampions()
+        .then(data => {
+            console.log('Meta data received:', data);
+            if (!data.hasData) {
+                // Retry a few times in case stats are still loading
+                if (metaRetryCount < 5) {
+                    metaRetryCount++;
+                    metaContent.innerHTML = `<div class="meta-loading">Loading stats... (attempt ${metaRetryCount})</div>`;
+                    setTimeout(loadMetaData, 2000);
+                    return;
+                }
+                metaContent.innerHTML = '<div class="meta-empty">No meta data available. Make sure stats are downloaded.</div>';
+                return;
+            }
+
+            metaHeader.textContent = `Top Champions - Patch ${data.patch}`;
+            metaDataLoaded = true;
+            currentMetaData = data;
+
+            metaContent.innerHTML = `
+                ${renderMetaRoleTabs()}
+                <div id="meta-role-content">
+                    ${renderMetaRoleContent(currentMetaRole)}
+                </div>
+            `;
+
+            setupMetaRoleTabHandlers();
+        })
+        .catch(err => {
+            console.error('Failed to load meta data:', err);
+            metaContent.innerHTML = '<div class="meta-empty">Failed to load meta data</div>';
+        });
+}
 
 // Format role name for display
 function formatRole(role) {
@@ -126,14 +254,14 @@ function updateStatus(status) {
 
 // Update champ select state
 function updateChampSelect(data) {
-    if (!data.inChampSelect) {
-        tabsContainer.classList.add('hidden');
-        statusCard.classList.remove('hidden');
-        return;
-    }
-    // In champ select - show tabs
+    // Always show tabs - Meta tab works outside champ select too
     statusCard.classList.add('hidden');
     tabsContainer.classList.remove('hidden');
+
+    if (!data.inChampSelect) {
+        // Not in champ select - could show a message or just keep tabs visible
+        return;
+    }
 }
 
 // Update team comp warning
@@ -357,3 +485,9 @@ GetConnectionStatus()
     .catch(() => {
         updateStatus({ connected: false, message: 'Waiting for League...' });
     });
+
+// Show tabs on startup and try to load meta data
+setTimeout(() => {
+    tabsContainer.classList.remove('hidden');
+    statusCard.classList.add('hidden');
+}, 500);
