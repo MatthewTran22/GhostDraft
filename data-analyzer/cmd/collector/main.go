@@ -34,7 +34,7 @@ func main() {
 	riotID := flag.String("riot-id", "", "Starting Riot ID (e.g., 'Player#NA1')")
 	puuid := flag.String("puuid", "", "Starting PUUID")
 	matchCount := flag.Int("count", 20, "Number of matches to fetch per player")
-	maxPlayers := flag.Int("max-players", 20, "Maximum unique players to collect")
+	maxPlayers := flag.Int("max-players", 100, "Maximum unique players to collect")
 	flag.Parse()
 
 	if *riotID == "" && *puuid == "" {

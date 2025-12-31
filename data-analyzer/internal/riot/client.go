@@ -91,19 +91,17 @@ func (c *Client) waitForRateLimit() {
 
 		// Check if we need to wait for short window
 		if len(c.shortWindow) >= requestsPerSecond {
-			waitTime := c.shortWindow[0].Add(time.Second).Sub(now) + 100*time.Millisecond
 			c.mu.Unlock()
-			fmt.Printf("      [Rate limit] %d req/sec, waiting %.1fs...\n", len(c.shortWindow), waitTime.Seconds())
-			time.Sleep(waitTime)
+			fmt.Printf("      [Rate limit] %d req/sec, waiting 30s...\n", len(c.shortWindow))
+			time.Sleep(30 * time.Second)
 			continue // Re-check after waiting
 		}
 
 		// Check if we need to wait for long window
 		if len(c.longWindow) >= requestsPer2Min {
-			waitTime := c.longWindow[0].Add(2*time.Minute).Sub(now) + 100*time.Millisecond
 			c.mu.Unlock()
-			fmt.Printf("      [Rate limit] %d req/2min, waiting %.1fs...\n", len(c.longWindow), waitTime.Seconds())
-			time.Sleep(waitTime)
+			fmt.Printf("      [Rate limit] %d req/2min, waiting 30s...\n", len(c.longWindow))
+			time.Sleep(30 * time.Second)
 			continue // Re-check after waiting
 		}
 
@@ -132,14 +130,9 @@ func (c *Client) doRequest(ctx context.Context, url string, result interface{}) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 429 {
-		// Rate limited - wait and retry
-		retryAfter := resp.Header.Get("Retry-After")
-		waitTime := 10 // Default 10 seconds
-		if retryAfter != "" {
-			fmt.Sscanf(retryAfter, "%d", &waitTime)
-		}
-		fmt.Printf("      [429 Rate Limited] Waiting %d seconds...\n", waitTime)
-		time.Sleep(time.Duration(waitTime) * time.Second)
+		// Rate limited - wait 30 seconds and retry
+		fmt.Printf("      [429 Rate Limited] Waiting 30 seconds...\n")
+		time.Sleep(30 * time.Second)
 		return c.doRequest(ctx, url, result)
 	}
 
