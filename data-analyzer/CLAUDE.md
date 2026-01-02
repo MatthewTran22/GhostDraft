@@ -55,19 +55,24 @@ go run cmd/reducer/main.go \
 Run the pipeline from a web UI:
 
 ```bash
-# Set your Riot API key
-export RIOT_API_KEY=RGAPI-xxxxx
+# 1. Create .env file with your Riot API key
+echo "RIOT_API_KEY=RGAPI-xxxxx" > .env
 
-# Start the UI
-docker-compose up pipeline
+# 2. Build and start the UI
+docker-compose up pipeline --build
 
-# Open http://localhost:8080
+# 3. Open http://localhost:8080
 ```
 
 The UI provides:
-- Form to input Riot ID and settings
-- Real-time streaming output
-- Reduce-only mode (skip collection)
+- Form to input Riot ID and collection settings
+- Real-time streaming output via SSE
+- "Reduce only" mode to skip collection and just run the reducer
+- Status display for API key and storage path
+
+Data is persisted to local volumes:
+- `./data/` - Raw JSONL match data (hot/warm/cold)
+- `./export/` - Generated data.json output
 
 ## Environment Variables
 Create `.env` file:
