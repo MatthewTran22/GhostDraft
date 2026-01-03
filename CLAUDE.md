@@ -1,13 +1,53 @@
 # GhostDraft - Project Overview
 
-A Wails-based League of Legends overlay that provides real-time champion select assistance.
+A League of Legends companion suite consisting of a desktop overlay app and a companion website, both sharing a unified Hextech Arcane visual theme.
 
-## Tech Stack
+## Projects
+
+### 1. Desktop App (Wails)
+Real-time champion select overlay that connects to the League Client.
 - **Backend**: Go with Wails v2
-- **Frontend**: Vanilla JavaScript (no framework)
-- **Data Sources**: Riot LCU API, Local SQLite (stats from remote JSON), Data Dragon
+- **Frontend**: Vanilla JavaScript + CSS
+- **Data Sources**: Riot LCU API, Local SQLite, Data Dragon
 
-## Project Structure
+### 2. Website (Next.js)
+Companion website for browsing champion stats, builds, and matchups.
+- **Framework**: Next.js 15 with App Router
+- **Styling**: Tailwind CSS + Custom Hextech theme
+- **Database**: SQLite with better-sqlite3
+- See `website/CLAUDE.md` for details
+
+### 3. Data Analyzer
+Match history collection and aggregation pipeline.
+- See `data-analyzer/CLAUDE.md` for details
+
+## Shared Design System: Hextech Arcane Theme
+
+Both the desktop app and website use a unified visual theme:
+
+### Color Palette
+```css
+--void-black: #0a0a0f        /* Deepest background */
+--abyss: #0d0d14             /* Card backgrounds */
+--deep-navy: #12121a         /* Secondary backgrounds */
+--hextech-gold: #c9a227      /* Primary accent */
+--pale-gold: #f0e6d2         /* Light gold for headers */
+--arcane-cyan: #00d4ff       /* Secondary accent */
+--text-primary: #e8e6e3      /* Main text */
+--text-secondary: #a09b8c    /* Muted text */
+```
+
+### Fonts
+- **Display/Headers**: Cinzel (serif, elegant)
+- **Body Text**: Rajdhani (sans-serif, technical)
+
+### Design Elements
+- Gold borders and glowing effects
+- Subtle hex pattern backgrounds
+- Rounded corners (8-12px)
+- Gold gradient hover states
+
+## Desktop App Structure
 
 ```
 ├── app.go                 # Main application logic, event handlers
@@ -15,7 +55,7 @@ A Wails-based League of Legends overlay that provides real-time champion select 
 ├── frontend/
 │   └── src/
 │       ├── main.js        # UI logic, event listeners, DOM updates
-│       └── style.css      # Styling
+│       └── style.css      # Hextech Arcane theme styling
 ├── internal/
 │   ├── lcu/
 │   │   ├── client.go      # LCU HTTP client (connects to League Client)
@@ -29,6 +69,7 @@ A Wails-based League of Legends overlay that provides real-time champion select 
 │       ├── champions.go   # SQLite DB for static champion data (damage types, tags)
 │       └── stats.go       # SQLite DB for match stats with remote update mechanism
 ├── data-analyzer/         # Separate module for collecting match data
+├── website/               # Next.js companion website
 ```
 
 ## Key Data Flows
