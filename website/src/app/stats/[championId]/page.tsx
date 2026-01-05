@@ -10,117 +10,12 @@ import { checkForUpdates, hasData } from "@/lib/db";
 import Link from "next/link";
 import type { Metadata } from "next";
 import {
-  getChampionName,
-  getChampionIcon,
+  getDDragon,
   roleDisplayNames,
   getWinRateClass,
   getTier,
   getTierColor,
 } from "@/lib/champions";
-
-// Item data for display
-const itemNames: Record<number, string> = {
-  3153: "Blade of the Ruined King",
-  3078: "Trinity Force",
-  3074: "Ravenous Hydra",
-  6333: "Death's Dance",
-  3156: "Maw of Malmortius",
-  3053: "Sterak's Gage",
-  3071: "Black Cleaver",
-  6630: "Goredrinker",
-  6631: "Stridebreaker",
-  3161: "Spear of Shojin",
-  6609: "Chempunk Chainsword",
-  3033: "Mortal Reminder",
-  3036: "Lord Dominik's Regards",
-  3026: "Guardian Angel",
-  6035: "Silvermere Dawn",
-  3139: "Mercurial Scimitar",
-  3181: "Hullbreaker",
-  6694: "Serylda's Grudge",
-  3142: "Youmuu's Ghostblade",
-  3179: "Umbral Glaive",
-  6676: "The Collector",
-  3814: "Edge of Night",
-  6692: "Eclipse",
-  6693: "Prowler's Claw",
-  6691: "Duskblade of Draktharr",
-  6697: "Hubris",
-  6701: "Opportunity",
-  3087: "Statikk Shiv",
-  3031: "Infinity Edge",
-  3046: "Phantom Dancer",
-  3094: "Rapid Firecannon",
-  3085: "Runaan's Hurricane",
-  6672: "Kraken Slayer",
-  6673: "Immortal Shieldbow",
-  3508: "Essence Reaver",
-  3072: "Bloodthirster",
-  6675: "Navori Quickblades",
-  3124: "Guinsoo's Rageblade",
-  3091: "Wit's End",
-  3115: "Nashor's Tooth",
-  4628: "Horizon Focus",
-  3089: "Rabadon's Deathcap",
-  3135: "Void Staff",
-  3116: "Rylai's Crystal Scepter",
-  3152: "Hextech Rocketbelt",
-  4636: "Night Harvester",
-  6653: "Liandry's Anguish",
-  6655: "Luden's Tempest",
-  6656: "Everfrost",
-  6657: "Rod of Ages",
-  3165: "Morellonomicon",
-  3102: "Banshee's Veil",
-  3157: "Zhonya's Hourglass",
-  4629: "Cosmic Drive",
-  3100: "Lich Bane",
-  4633: "Riftmaker",
-  3118: "Malignance",
-  3119: "Winter's Approach",
-  3003: "Archangel's Staff",
-  3004: "Manamune",
-  3042: "Muramana",
-  3040: "Seraph's Embrace",
-  3068: "Sunfire Aegis",
-  6662: "Iceborn Gauntlet",
-  3075: "Thornmail",
-  3110: "Frozen Heart",
-  3143: "Randuin's Omen",
-  3742: "Dead Man's Plate",
-  6664: "Hollow Radiance",
-  6665: "Jak'Sho, The Protean",
-  3193: "Gargoyle Stoneplate",
-  3190: "Locket of the Iron Solari",
-  2065: "Shurelya's Battlesong",
-  4005: "Imperial Mandate",
-  3107: "Redemption",
-  3011: "Chemtech Putrifier",
-  3222: "Mikael's Blessing",
-  3504: "Ardent Censer",
-  3109: "Knight's Vow",
-  3050: "Zeke's Convergence",
-  6616: "Staff of Flowing Water",
-  6617: "Moonstone Renewer",
-  3065: "Spirit Visage",
-  3083: "Warmog's Armor",
-  3076: "Bramble Vest",
-  3047: "Plated Steelcaps",
-  3111: "Mercury's Treads",
-  3009: "Boots of Swiftness",
-  3020: "Sorcerer's Shoes",
-  3006: "Berserker's Greaves",
-  3158: "Ionian Boots of Lucidity",
-  3117: "Mobility Boots",
-};
-
-function getItemName(id: number): string {
-  return itemNames[id] || `Item ${id}`;
-}
-
-function getItemIcon(id: number): string {
-  return `https://ddragon.leagueoflegends.com/cdn/14.24.1/img/item/${id}.png`;
-}
 
 interface PageProps {
   params: Promise<{ championId: string }>;
@@ -130,7 +25,8 @@ interface PageProps {
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { championId } = await params;
   const champId = parseInt(championId);
-  const name = getChampionName(champId);
+  const ddragon = await getDDragon();
+  const name = ddragon.getChampionName(champId);
 
   return {
     title: `${name} Stats & Build - GhostDraft`,
@@ -144,8 +40,11 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
   const { championId } = await params;
   const { role: queryRole } = await searchParams;
 
+  // Load Data Dragon data
+  const ddragon = await getDDragon();
+
   const champId = parseInt(championId);
-  const champName = getChampionName(champId);
+  const champName = ddragon.getChampionName(champId);
 
   // Check for updates
   try {
@@ -199,7 +98,7 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
           <div className="relative">
             <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-[var(--hextech-gold)]/50 pulse-glow">
               <img
-                src={getChampionIcon(champId)}
+                src={ddragon.getChampionIcon(champId)}
                 alt={champName}
                 className="w-full h-full object-cover"
               />
@@ -276,8 +175,8 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
                     <div key={index} className="text-center">
                       <div className="w-14 h-14 rounded-lg overflow-hidden border-2 border-[var(--hextech-gold)]/30 bg-[var(--arcane-blue)]/30 mb-1">
                         <img
-                          src={getItemIcon(itemId)}
-                          alt={getItemName(itemId)}
+                          src={ddragon.getItemIcon(itemId)}
+                          alt={ddragon.getItemName(itemId)}
                           className="w-full h-full object-cover"
                         />
                       </div>
@@ -299,13 +198,13 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
                       >
                         <div className="w-10 h-10 rounded overflow-hidden border border-[var(--hextech-gold)]/20">
                           <img
-                            src={getItemIcon(item.itemId)}
-                            alt={getItemName(item.itemId)}
+                            src={ddragon.getItemIcon(item.itemId)}
+                            alt={ddragon.getItemName(item.itemId)}
                             className="w-full h-full object-cover"
                           />
                         </div>
                         <span className="flex-1 text-[var(--text-primary)] text-sm">
-                          {getItemName(item.itemId)}
+                          {ddragon.getItemName(item.itemId)}
                         </span>
                         <span className={`text-sm font-medium ${getWinRateClass(item.winRate)}`}>
                           {item.winRate.toFixed(1)}%
@@ -331,13 +230,13 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
                       >
                         <div className="w-10 h-10 rounded overflow-hidden border border-[var(--hextech-gold)]/20">
                           <img
-                            src={getItemIcon(item.itemId)}
-                            alt={getItemName(item.itemId)}
+                            src={ddragon.getItemIcon(item.itemId)}
+                            alt={ddragon.getItemName(item.itemId)}
                             className="w-full h-full object-cover"
                           />
                         </div>
                         <span className="flex-1 text-[var(--text-primary)] text-sm">
-                          {getItemName(item.itemId)}
+                          {ddragon.getItemName(item.itemId)}
                         </span>
                         <span className={`text-sm font-medium ${getWinRateClass(item.winRate)}`}>
                           {item.winRate.toFixed(1)}%
@@ -376,13 +275,13 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
                     >
                       <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-red-500/30">
                         <img
-                          src={getChampionIcon(matchup.enemyChampionId)}
-                          alt={getChampionName(matchup.enemyChampionId)}
+                          src={ddragon.getChampionIcon(matchup.enemyChampionId)}
+                          alt={ddragon.getChampionName(matchup.enemyChampionId)}
                           className="w-full h-full object-cover"
                         />
                       </div>
                       <span className="flex-1 text-[var(--text-primary)] font-medium group-hover:text-[var(--pale-gold)] transition-colors">
-                        {getChampionName(matchup.enemyChampionId)}
+                        {ddragon.getChampionName(matchup.enemyChampionId)}
                       </span>
                       <div className="text-right">
                         <div className="wr-low font-semibold">{matchup.winRate.toFixed(1)}%</div>
@@ -417,13 +316,13 @@ export default async function ChampionPage({ params, searchParams }: PageProps) 
                     >
                       <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-green-500/30">
                         <img
-                          src={getChampionIcon(matchup.enemyChampionId)}
-                          alt={getChampionName(matchup.enemyChampionId)}
+                          src={ddragon.getChampionIcon(matchup.enemyChampionId)}
+                          alt={ddragon.getChampionName(matchup.enemyChampionId)}
                           className="w-full h-full object-cover"
                         />
                       </div>
                       <span className="flex-1 text-[var(--text-primary)] font-medium group-hover:text-[var(--pale-gold)] transition-colors">
-                        {getChampionName(matchup.enemyChampionId)}
+                        {ddragon.getChampionName(matchup.enemyChampionId)}
                       </span>
                       <div className="text-right">
                         <div className="wr-high font-semibold">{matchup.winRate.toFixed(1)}%</div>

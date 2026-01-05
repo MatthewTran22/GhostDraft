@@ -3,8 +3,7 @@ import { checkForUpdates, hasData } from "@/lib/db";
 import Link from "next/link";
 import type { Metadata } from "next";
 import {
-  getChampionName,
-  getChampionIcon,
+  getDDragon,
   roleDisplayNames,
   getWinRateClass,
   getTier,
@@ -27,6 +26,9 @@ interface PageProps {
 export default async function StatsPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const selectedRole = params.role || "top";
+
+  // Load Data Dragon data
+  const ddragon = await getDDragon();
 
   // Check for updates and ensure we have data
   try {
@@ -135,14 +137,14 @@ export default async function StatsPage({ searchParams }: PageProps) {
                     <div className="col-span-4 flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-[var(--hextech-gold)]/30 group-hover:border-[var(--hextech-gold)]/60 transition-all">
                         <img
-                          src={getChampionIcon(champ.championId)}
-                          alt={getChampionName(champ.championId)}
+                          src={ddragon.getChampionIcon(champ.championId)}
+                          alt={ddragon.getChampionName(champ.championId)}
                           className="w-full h-full object-cover"
                           loading="lazy"
                         />
                       </div>
                       <span className="text-[var(--text-primary)] font-medium group-hover:text-[var(--pale-gold)] transition-colors">
-                        {getChampionName(champ.championId)}
+                        {ddragon.getChampionName(champ.championId)}
                       </span>
                     </div>
                     <div className="col-span-2 text-center">

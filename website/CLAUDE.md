@@ -82,11 +82,16 @@ Core query functions:
 - `fetchChampionStats()` - Single champion stats
 - `fetchChampionRoles()` - Roles a champion plays
 
+### `lib/ddragon.ts`
+- Fetches latest version from Data Dragon API dynamically
+- Loads champion and item data from Data Dragon
+- Caches data for 1 hour (uses Next.js fetch caching)
+- Exports `getDDragon()` for synchronous lookups after initial load
+
 ### `lib/champions.ts`
-- Champion ID to name mapping
-- Data Dragon icon URL generation
+- Re-exports Data Dragon functions (getChampionName, getChampionIcon, getItemName, getItemIcon)
 - Tier calculation (S+/S/A/B/C/D based on win rate + pick rate)
-- Role display names
+- Role display names and utility functions
 
 ## Database Schema
 

@@ -252,18 +252,20 @@ export function fetchAllMatchups(championId: number, role: string): MatchupStat[
 export function fetchCounterMatchups(
   championId: number,
   role: string,
-  limit: number = 10
+  limit: number = 5
 ): MatchupStat[] {
   const db = getDb();
   const position = roleToPosition(role);
 
+  // Counters = matchups where our win rate is < 49%
   const rows = db
     .prepare(
       `SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
        FROM champion_matchups
        WHERE champion_id = ? AND team_position = ?
        GROUP BY enemy_champion_id
-       HAVING SUM(matches) >= 20
+       HAVING SUM(matches) >= 10
+          AND (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) < 0.49
        ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) ASC
        LIMIT ?`
     )
@@ -326,18 +328,20 @@ export function fetchAllChampionsByRole(role: string): ChampionWinRate[] {
 export function fetchBestMatchups(
   championId: number,
   role: string,
-  limit: number = 10
+  limit: number = 5
 ): MatchupStat[] {
   const db = getDb();
   const position = roleToPosition(role);
 
+  // Best matchups = matchups where our win rate is > 51%
   const rows = db
     .prepare(
       `SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
        FROM champion_matchups
        WHERE champion_id = ? AND team_position = ?
        GROUP BY enemy_champion_id
-       HAVING SUM(matches) >= 20
+       HAVING SUM(matches) >= 10
+          AND (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) > 0.51
        ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) DESC
        LIMIT ?`
     )
