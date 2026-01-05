@@ -181,3 +181,17 @@ func (c *Client) Disconnect() {
 	}
 	c.credentials = nil
 }
+
+// Get performs a GET request to the LCU API
+func (c *Client) Get(endpoint string) (*http.Response, error) {
+	if c.credentials == nil {
+		return nil, ErrLeagueNotRunning
+	}
+
+	req, err := http.NewRequest("GET", c.baseURL+endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader)
+	return c.httpClient.Do(req)
+}

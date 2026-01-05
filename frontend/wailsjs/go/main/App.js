@@ -6,12 +6,24 @@ export function ForceStatsUpdate() {
   return window['go']['main']['App']['ForceStatsUpdate']();
 }
 
+export function GetChampionBuild(arg1, arg2) {
+  return window['go']['main']['App']['GetChampionBuild'](arg1, arg2);
+}
+
+export function GetChampionDetails(arg1, arg2) {
+  return window['go']['main']['App']['GetChampionDetails'](arg1, arg2);
+}
+
 export function GetConnectionStatus() {
   return window['go']['main']['App']['GetConnectionStatus']();
 }
 
 export function GetMetaChampions() {
   return window['go']['main']['App']['GetMetaChampions']();
+}
+
+export function GetPersonalStats() {
+  return window['go']['main']['App']['GetPersonalStats']();
 }
 
 export function RegisterToggleHotkey() {

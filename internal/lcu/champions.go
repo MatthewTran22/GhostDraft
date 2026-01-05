@@ -127,6 +127,17 @@ func (r *ChampionRegistry) GetIconURL(id int) string {
 	return ""
 }
 
+// GetSplashURL returns the Data Dragon splash art URL for a given champion ID
+func (r *ChampionRegistry) GetSplashURL(id int) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if info, ok := r.champions[id]; ok {
+		return fmt.Sprintf("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/%s_0.jpg", info.IconID)
+	}
+	return ""
+}
+
 // IsLoaded returns whether the registry has been loaded
 func (r *ChampionRegistry) IsLoaded() bool {
 	r.mu.RLock()

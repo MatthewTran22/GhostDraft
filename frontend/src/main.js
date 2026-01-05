@@ -1,5 +1,5 @@
 import './style.css';
-import { GetConnectionStatus, GetMetaChampions } from '../wailsjs/go/main/App';
+import { GetConnectionStatus, GetMetaChampions, GetPersonalStats, GetChampionDetails, GetChampionBuild } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 // Initial HTML structure
@@ -18,10 +18,18 @@ document.querySelector('#app').innerHTML = `
 
         <div class="tabs-container hidden" id="tabs-container">
             <div class="tabs-header">
+                <button class="tab-btn" data-tab="stats">Stats</button>
                 <button class="tab-btn active" data-tab="matchup">Matchup</button>
                 <button class="tab-btn" data-tab="build">Build</button>
                 <button class="tab-btn" data-tab="teamcomp">Team Comp</button>
                 <button class="tab-btn" data-tab="meta">Meta</button>
+            </div>
+
+            <div class="tab-content" id="tab-stats">
+                <div class="stats-header">Recent Performance</div>
+                <div class="stats-content" id="stats-content">
+                    <div class="stats-loading">Loading stats...</div>
+                </div>
             </div>
 
             <div class="tab-content active" id="tab-matchup">
@@ -103,6 +111,7 @@ const enemyTags = document.getElementById('enemy-tags');
 const enemyDamage = document.getElementById('enemy-damage');
 const metaHeader = document.getElementById('meta-header');
 const metaContent = document.getElementById('meta-content');
+const statsContent = document.getElementById('stats-content');
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -114,18 +123,48 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
 
-        // Load meta data when meta tab is clicked
+        // Load data when specific tabs are clicked
         if (btn.dataset.tab === 'meta') {
             loadMetaData();
+        } else if (btn.dataset.tab === 'stats') {
+            loadPersonalStats();
         }
     });
 });
 
-// Meta data loaded flag
+// State tracking
 let metaDataLoaded = false;
 let metaRetryCount = 0;
 let currentMetaData = null;
 let currentMetaRole = 'top';
+let isInChampSelect = false;
+let statsLoaded = false;
+let statsRetryCount = 0;
+let selectedChampion = null; // { championId, role }
+
+// Tabs that are only visible during champ select
+const champSelectOnlyTabs = ['matchup', 'build', 'teamcomp'];
+
+// Update tab visibility based on champ select state
+function updateTabVisibility(inChampSelect) {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const activeTab = document.querySelector('.tab-btn.active');
+
+    tabButtons.forEach(btn => {
+        const tabName = btn.dataset.tab;
+        if (champSelectOnlyTabs.includes(tabName)) {
+            btn.classList.toggle('hidden', !inChampSelect);
+        }
+    });
+
+    // If leaving champ select and current tab is a champ-select-only tab, switch to Stats
+    if (!inChampSelect && activeTab && champSelectOnlyTabs.includes(activeTab.dataset.tab)) {
+        const statsBtn = document.querySelector('.tab-btn[data-tab="stats"]');
+        if (statsBtn) {
+            statsBtn.click();
+        }
+    }
+}
 
 const roleOrder = ['top', 'jungle', 'middle', 'bottom', 'utility'];
 const roleNames = {
@@ -169,7 +208,7 @@ function renderMetaRoleContent(role) {
                 <span class="meta-wr-header">Win %</span>
             </div>
             ${champs.map((c, idx) => `
-                <div class="meta-champ-row">
+                <div class="meta-champ-row clickable" data-champ-id="${c.championId}" data-role="${role}">
                     <span class="meta-rank">${idx + 1}</span>
                     <img class="meta-icon" src="${c.iconURL}" alt="${c.championName}" />
                     <span class="meta-name">${c.championName}</span>
@@ -186,18 +225,219 @@ function setupMetaRoleTabHandlers() {
     document.querySelectorAll('.meta-role-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             currentMetaRole = tab.dataset.role;
+            selectedChampion = null; // Reset selection when changing roles
             // Update active state
             document.querySelectorAll('.meta-role-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             // Update content
             document.getElementById('meta-role-content').innerHTML = renderMetaRoleContent(currentMetaRole);
+            setupMetaChampionClickHandlers();
         });
     });
 }
 
+// Setup click handlers for champion rows
+function setupMetaChampionClickHandlers() {
+    document.querySelectorAll('.meta-champ-row.clickable').forEach(row => {
+        row.addEventListener('click', () => {
+            const champId = parseInt(row.dataset.champId);
+            const role = row.dataset.role;
+
+            selectedChampion = { championId: champId, role };
+
+            // Hide the tier list view and show details view
+            document.getElementById('meta-tier-list').classList.add('hidden');
+            document.getElementById('meta-details-view').classList.remove('hidden');
+
+            // Load champion details
+            loadChampionDetails(champId, role);
+        });
+    });
+}
+
+// Go back to tier list from champion details
+function showMetaTierList() {
+    selectedChampion = null;
+    document.getElementById('meta-tier-list').classList.remove('hidden');
+    document.getElementById('meta-details-view').classList.add('hidden');
+}
+
+// Helper to render basic items (no win rate) - shared between Build tab and Meta details
+function renderBasicItems(items) {
+    if (items && items.length > 0) {
+        return items.map(item => `
+            <div class="item-slot">
+                <img class="item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name}" />
+            </div>
+        `).join('');
+    }
+    return '<div class="items-empty">No data</div>';
+}
+
+// Helper to render items with win rate - shared between Build tab and Meta details
+function renderItemsWithWR(items) {
+    if (items && items.length > 0) {
+        return items.map(item => {
+            const wr = item.winRate ? item.winRate.toFixed(1) : '?';
+            const wrClass = item.winRate >= 51 ? 'winning' : item.winRate <= 49 ? 'losing' : 'even';
+            return `
+                <div class="item-slot-wr">
+                    <img class="item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name} (${item.games} games)" />
+                    <span class="item-wr ${wrClass}">${wr}%</span>
+                </div>
+            `;
+        }).join('');
+    }
+    return '<div class="items-empty">No data</div>';
+}
+
+// Load and display champion details
+function loadChampionDetails(championId, role) {
+    const detailsEl = document.getElementById('meta-champion-details');
+    detailsEl.innerHTML = '<div class="details-loading">Loading details...</div>';
+
+    // Fetch both matchup data and build data in parallel
+    Promise.all([
+        GetChampionDetails(championId, role),
+        GetChampionBuild(championId, role)
+    ]).then(([matchupData, buildData]) => {
+        if (!matchupData.hasData && !buildData.hasItems) {
+            detailsEl.innerHTML = `
+                <button class="details-back-btn" onclick="showMetaTierList()">← Back to Tier List</button>
+                <div class="details-empty">No detailed data available</div>
+            `;
+            return;
+        }
+
+        const champName = matchupData.championName || buildData.championName;
+
+        let html = `
+            <button class="details-back-btn" onclick="showMetaTierList()">← Back to Tier List</button>
+            <div class="details-header">${champName} <span class="details-role">${formatRole(role)}</span></div>
+        `;
+
+        // Build section - reuse exact same format as Build tab
+        if (buildData.hasItems && buildData.builds && buildData.builds.length > 0) {
+            // Build subtabs
+            html += `<div class="details-build-subtabs" id="details-build-subtabs">`;
+            buildData.builds.forEach((build, idx) => {
+                const wr = build.winRate ? build.winRate.toFixed(1) : '?';
+                const wrClass = build.winRate >= 51 ? 'winning' : build.winRate <= 49 ? 'losing' : 'even';
+                html += `
+                    <button class="build-subtab ${idx === 0 ? 'active' : ''}" data-build-idx="${idx}">
+                        <span class="subtab-name">${build.name}</span>
+                        <span class="subtab-wr ${wrClass}">${wr}%</span>
+                        <span class="subtab-games">${build.games} games</span>
+                    </button>
+                `;
+            });
+            html += `</div>`;
+
+            // Build content container
+            html += `<div class="details-build-content" id="details-build-content"></div>`;
+        }
+
+        // Matchups section
+        if (matchupData.hasData) {
+            if (matchupData.counters && matchupData.counters.length > 0) {
+                html += `
+                    <div class="details-section">
+                        <div class="details-section-title">Countered By</div>
+                        <div class="details-matchups">
+                            ${matchupData.counters.slice(0, 5).map(m => `
+                                <div class="details-matchup bad">
+                                    <img class="details-matchup-icon" src="${m.iconURL}" alt="${m.championName}" title="${m.championName}" />
+                                    <span class="details-matchup-wr">${m.winRate.toFixed(0)}%</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (matchupData.goodMatchups && matchupData.goodMatchups.length > 0) {
+                html += `
+                    <div class="details-section">
+                        <div class="details-section-title">Strong Against</div>
+                        <div class="details-matchups">
+                            ${matchupData.goodMatchups.slice(0, 5).map(m => `
+                                <div class="details-matchup good">
+                                    <img class="details-matchup-icon" src="${m.iconURL}" alt="${m.championName}" title="${m.championName}" />
+                                    <span class="details-matchup-wr">${m.winRate.toFixed(0)}%</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        detailsEl.innerHTML = html;
+
+        // Setup build subtab handlers and render first build
+        if (buildData.hasItems && buildData.builds && buildData.builds.length > 0) {
+            const subtabsEl = document.getElementById('details-build-subtabs');
+            const contentEl = document.getElementById('details-build-content');
+
+            // Render build content for a specific index
+            const renderDetailsBuild = (buildIdx) => {
+                const build = buildData.builds[buildIdx];
+                if (!build) {
+                    contentEl.innerHTML = '<div class="items-empty">No build data</div>';
+                    return;
+                }
+
+                contentEl.innerHTML = `
+                    <div class="items-section">
+                        <div class="items-header">Core Items</div>
+                        <div class="items-grid">${renderBasicItems(build.coreItems)}</div>
+                    </div>
+                    <div class="items-section">
+                        <div class="items-header">4th Item Options</div>
+                        <div class="items-grid">${renderItemsWithWR(build.fourthItems)}</div>
+                    </div>
+                    <div class="items-section">
+                        <div class="items-header">5th Item Options</div>
+                        <div class="items-grid">${renderItemsWithWR(build.fifthItems)}</div>
+                    </div>
+                    <div class="items-section">
+                        <div class="items-header">6th Item Options</div>
+                        <div class="items-grid">${renderItemsWithWR(build.sixthItems)}</div>
+                    </div>
+                `;
+            };
+
+            // Add click handlers for subtabs
+            subtabsEl.querySelectorAll('.build-subtab').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    subtabsEl.querySelectorAll('.build-subtab').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    renderDetailsBuild(parseInt(btn.dataset.buildIdx));
+                });
+            });
+
+            // Render first build
+            renderDetailsBuild(0);
+        }
+    }).catch(err => {
+        console.error('Failed to load champion details:', err);
+        detailsEl.innerHTML = `
+            <button class="details-back-btn" onclick="showMetaTierList()">← Back to Tier List</button>
+            <div class="details-empty">Failed to load details</div>
+        `;
+    });
+}
+
+// Make showMetaTierList available globally for onclick
+window.showMetaTierList = showMetaTierList;
+
 // Load and display meta champions
 function loadMetaData() {
-    if (metaDataLoaded) return;
+    if (metaDataLoaded) {
+        // If already loaded, just make sure we're showing tier list (not details)
+        showMetaTierList();
+        return;
+    }
 
     console.log('Loading meta data...');
     GetMetaChampions()
@@ -220,17 +460,135 @@ function loadMetaData() {
             currentMetaData = data;
 
             metaContent.innerHTML = `
-                ${renderMetaRoleTabs()}
-                <div id="meta-role-content">
-                    ${renderMetaRoleContent(currentMetaRole)}
+                <div id="meta-tier-list">
+                    ${renderMetaRoleTabs()}
+                    <div id="meta-role-content">
+                        ${renderMetaRoleContent(currentMetaRole)}
+                    </div>
+                </div>
+                <div id="meta-details-view" class="hidden">
+                    <div id="meta-champion-details"></div>
                 </div>
             `;
 
             setupMetaRoleTabHandlers();
+            setupMetaChampionClickHandlers();
         })
         .catch(err => {
             console.error('Failed to load meta data:', err);
             metaContent.innerHTML = '<div class="meta-empty">Failed to load meta data</div>';
+        });
+}
+
+// Load and display personal stats
+function loadPersonalStats() {
+    // Always refresh stats when tab is clicked (don't cache)
+    statsContent.innerHTML = '<div class="stats-loading">Loading your stats...</div>';
+
+    GetPersonalStats()
+        .then(data => {
+            if (!data.hasData) {
+                if (statsRetryCount < 3) {
+                    statsRetryCount++;
+                    statsContent.innerHTML = `<div class="stats-loading">Waiting for League Client... (attempt ${statsRetryCount})</div>`;
+                    setTimeout(loadPersonalStats, 2000);
+                    return;
+                }
+                statsContent.innerHTML = '<div class="stats-empty">No match history available. Make sure League Client is running.</div>';
+                return;
+            }
+
+            statsRetryCount = 0;
+            statsLoaded = true;
+
+            const wrClass = data.winRate >= 55 ? 'winning' : data.winRate <= 45 ? 'losing' : 'even';
+            const kdaClass = data.avgKDA >= 3 ? 'excellent' : data.avgKDA >= 2 ? 'good' : 'average';
+
+            // Overall ranked stats strip at top
+            let html = `
+                <div class="stats-overall-strip">
+                    <div class="stats-strip-item">
+                        <span class="stats-strip-value">${data.wins}W ${data.losses}L</span>
+                        <span class="stats-strip-label">Record</span>
+                    </div>
+                    <div class="stats-strip-item">
+                        <span class="stats-strip-value ${wrClass}">${data.winRate.toFixed(0)}%</span>
+                        <span class="stats-strip-label">Win Rate</span>
+                    </div>
+                    <div class="stats-strip-item">
+                        <span class="stats-strip-value ${kdaClass}">${data.avgKDA.toFixed(2)}</span>
+                        <span class="stats-strip-label">KDA</span>
+                    </div>
+                    <div class="stats-strip-item">
+                        <span class="stats-strip-value">${data.avgCSPerMin.toFixed(1)}</span>
+                        <span class="stats-strip-label">CS/min</span>
+                    </div>
+                </div>
+            `;
+
+            // Champion banner with splash art background
+            if (data.championStats && data.championStats.length > 0) {
+                const topChamp = data.championStats[0];
+                const topWrClass = topChamp.winRate >= 55 ? 'winning' : topChamp.winRate <= 45 ? 'losing' : 'even';
+                const topKdaClass = topChamp.avgKDA >= 3 ? 'excellent' : topChamp.avgKDA >= 2 ? 'good' : 'average';
+
+                html += `
+                    <div class="stats-banner" style="background-image: url('${topChamp.splashURL}');">
+                        <div class="stats-banner-overlay"></div>
+                        <div class="stats-banner-content">
+                            <div class="stats-banner-label">Most Played in Ranked</div>
+                            <div class="stats-banner-name-row">
+                                <img class="stats-banner-role-icon" src="${topChamp.roleIconURL}" alt="${topChamp.role}" />
+                                <span class="stats-banner-name">${topChamp.championName}</span>
+                            </div>
+                            <div class="stats-banner-role">${topChamp.role}</div>
+                            <div class="stats-banner-games">${topChamp.games} games</div>
+                            <div class="stats-banner-stats">
+                                <div class="stats-banner-stat">
+                                    <span class="stat-value ${topWrClass}">${topChamp.winRate.toFixed(0)}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
+                                <div class="stats-banner-stat">
+                                    <span class="stat-value ${topKdaClass}">${topChamp.avgKDA.toFixed(2)}</span>
+                                    <span class="stat-label">KDA</span>
+                                </div>
+                                <div class="stats-banner-stat">
+                                    <span class="stat-value">${topChamp.avgCSPerMin.toFixed(1)}</span>
+                                    <span class="stat-label">CS/min</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Other recently played champions
+                if (data.championStats.length > 1) {
+                    html += `
+                        <div class="stats-other-champs">
+                            <div class="stats-other-header">Also Played</div>
+                            <div class="stats-other-list">
+                                ${data.championStats.slice(1).map(c => {
+                                    const cWrClass = c.winRate >= 55 ? 'winning' : c.winRate <= 45 ? 'losing' : 'even';
+                                    return `
+                                        <div class="stats-other-row">
+                                            <img class="stats-other-icon" src="${c.iconURL}" alt="${c.championName}" />
+                                            <span class="stats-other-name">${c.championName}</span>
+                                            <span class="stats-other-games">${c.games}</span>
+                                            <span class="stats-other-wr ${cWrClass}">${c.winRate.toFixed(0)}%</span>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            statsContent.innerHTML = html;
+        })
+        .catch(err => {
+            console.error('Failed to load personal stats:', err);
+            statsContent.innerHTML = '<div class="stats-empty">Failed to load stats</div>';
         });
 }
 
@@ -254,9 +612,18 @@ function updateStatus(status) {
 
 // Update champ select state
 function updateChampSelect(data) {
-    // Always show tabs - Meta tab works outside champ select too
+    // Always show tabs container - Meta tab works outside champ select too
     statusCard.classList.add('hidden');
     tabsContainer.classList.remove('hidden');
+
+    // Track champ select state and update tab visibility
+    const wasInChampSelect = isInChampSelect;
+    isInChampSelect = data.inChampSelect;
+
+    // Only update visibility when state changes
+    if (wasInChampSelect !== isInChampSelect) {
+        updateTabVisibility(isInChampSelect);
+    }
 
     if (!data.inChampSelect) {
         // Reset team comp UI when leaving champ select
@@ -411,7 +778,7 @@ function updateItems(data) {
     renderBuildContent(0);
 }
 
-// Render content for a specific build path
+// Render content for a specific build path (uses shared helpers)
 function renderBuildContent(buildIdx) {
     if (!currentBuildsData || !currentBuildsData[buildIdx]) {
         buildContent.innerHTML = '<div class="items-empty">No build data</div>';
@@ -419,35 +786,6 @@ function renderBuildContent(buildIdx) {
     }
 
     const build = currentBuildsData[buildIdx];
-
-    // Helper to render basic items (no win rate)
-    const renderBasicItems = (items) => {
-        if (items && items.length > 0) {
-            return items.map(item => `
-                <div class="item-slot">
-                    <img class="item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name}" />
-                </div>
-            `).join('');
-        }
-        return '<div class="items-empty">No data</div>';
-    };
-
-    // Helper to render items with win rate
-    const renderItemsWithWR = (items) => {
-        if (items && items.length > 0) {
-            return items.map(item => {
-                const wr = item.winRate ? item.winRate.toFixed(1) : '?';
-                const wrClass = item.winRate >= 51 ? 'winning' : item.winRate <= 49 ? 'losing' : 'even';
-                return `
-                    <div class="item-slot-wr">
-                        <img class="item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name} (${item.games} games)" />
-                        <span class="item-wr ${wrClass}">${wr}%</span>
-                    </div>
-                `;
-            }).join('');
-        }
-        return '<div class="items-empty">No data</div>';
-    };
 
     buildContent.innerHTML = `
         <div class="items-section">
@@ -485,8 +823,17 @@ GetConnectionStatus()
         updateStatus({ connected: false, message: 'Waiting for League...' });
     });
 
-// Show tabs on startup and try to load meta data
+// Initialize on startup - start with Stats view (not in champ select)
 setTimeout(() => {
     tabsContainer.classList.remove('hidden');
     statusCard.classList.add('hidden');
+
+    // Hide champ-select-only tabs initially
+    updateTabVisibility(false);
+
+    // Switch to Stats tab and load data
+    const statsBtn = document.querySelector('.tab-btn[data-tab="stats"]');
+    if (statsBtn) {
+        statsBtn.click();
+    }
 }, 500);
