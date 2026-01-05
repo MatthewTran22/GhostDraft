@@ -15,6 +15,7 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 		a.lastFetchedEnemy = 0
 		a.lastBanFetchKey = ""
 		a.lastItemFetchKey = ""
+		a.lastCounterFetchKey = ""
 		runtime.EventsEmit(a.ctx, "champselect:update", map[string]interface{}{
 			"inChampSelect": false,
 		})
@@ -26,6 +27,9 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 		})
 		runtime.EventsEmit(a.ctx, "items:update", map[string]interface{}{
 			"hasItems": false,
+		})
+		runtime.EventsEmit(a.ctx, "counterpicks:update", map[string]interface{}{
+			"hasData": false,
 		})
 		fmt.Println("Exited Champion Select")
 		return
@@ -97,15 +101,18 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 	var hoveredChampionID int
 	var actionType string
 	if currentAction != nil {
-		hoveredChampionID = currentAction.ChampionID
 		actionType = currentAction.Type
+		// Only track hovered champion for pick actions, not ban actions
+		if currentAction.Type == "pick" {
+			hoveredChampionID = currentAction.ChampionID
+		}
 		fmt.Printf("Current action: Type=%s, ChampionID=%d, IsInProgress=%v, Completed=%v\n",
 			currentAction.Type, currentAction.ChampionID, currentAction.IsInProgress, currentAction.Completed)
 	} else {
 		fmt.Println("No current action (not your turn)")
 	}
 
-	// Get champion names
+	// Get champion names - only use pick actions or locked champion, not ban hovers
 	var championName string
 	var championID int
 	var isLocked bool
@@ -120,19 +127,6 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 
 	fmt.Printf("Final: championID=%d, championName=%s, lastFetched=%d\n", championID, championName, a.lastFetchedChamp)
 
-	data := map[string]interface{}{
-		"inChampSelect": true,
-		"phase":         session.Timer.Phase,
-		"championName":  championName,
-		"championID":    championID,
-		"isLocked":      isLocked,
-		"localPosition": localPosition,
-		"actionType":    actionType,
-		"timeLeft":      session.Timer.TimeLeftInPhase,
-	}
-
-	runtime.EventsEmit(a.ctx, "champselect:update", data)
-
 	// Check if all bans are completed (we're in pick phase)
 	hasIncompleteBan := false
 	for _, actionGroup := range session.Actions {
@@ -146,6 +140,20 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 			break
 		}
 	}
+
+	data := map[string]interface{}{
+		"inChampSelect":   true,
+		"phase":           session.Timer.Phase,
+		"championName":    championName,
+		"championID":      championID,
+		"isLocked":        isLocked,
+		"localPosition":   localPosition,
+		"actionType":      actionType,
+		"timeLeft":        session.Timer.TimeLeftInPhase,
+		"banPhaseComplete": !hasIncompleteBan,
+	}
+
+	runtime.EventsEmit(a.ctx, "champselect:update", data)
 
 	// Show recommended bans whenever we have a champion + role
 	fmt.Printf("Ban check: championID=%d, localPosition='%s', lastBanFetchKey='%s'\n", championID, localPosition, a.lastBanFetchKey)
@@ -176,6 +184,29 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 	// During ban phase, don't fetch matchup data yet
 	if hasIncompleteBan {
 		return
+	}
+
+	// Find enemy laner (same position as us)
+	var enemyLanerID int
+	for _, enemy := range session.TheirTeam {
+		if enemy.ChampionID > 0 && enemy.GetPosition() == localPosition {
+			enemyLanerID = enemy.ChampionID
+			break
+		}
+	}
+
+	// Fetch counter picks for enemy laner (after ban phase)
+	if enemyLanerID > 0 && localPosition != "" {
+		counterKey := fmt.Sprintf("counter-%d-%s", enemyLanerID, localPosition)
+		if counterKey != a.lastCounterFetchKey {
+			a.lastCounterFetchKey = counterKey
+			go a.fetchAndEmitCounterPicks(enemyLanerID, localPosition)
+		}
+	} else {
+		// No enemy laner visible yet
+		runtime.EventsEmit(a.ctx, "counterpicks:update", map[string]interface{}{
+			"hasData": false,
+		})
 	}
 
 	// Fetch build data when champion changes or new enemies appear

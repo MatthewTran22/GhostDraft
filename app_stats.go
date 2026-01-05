@@ -125,6 +125,58 @@ func (a *App) fetchAndEmitBuild(championID int, championName string, role string
 	})
 }
 
+// fetchAndEmitCounterPicks fetches champions that counter the enemy laner
+func (a *App) fetchAndEmitCounterPicks(enemyChampionID int, role string) {
+	enemyName := a.champions.GetName(enemyChampionID)
+	fmt.Printf("Fetching counter picks vs %s (%s)...\n", enemyName, role)
+
+	if a.statsProvider == nil {
+		fmt.Println("Stats provider not available for counter picks")
+		runtime.EventsEmit(a.ctx, "counterpicks:update", map[string]interface{}{
+			"hasData": false,
+		})
+		return
+	}
+
+	counterPicks, err := a.statsProvider.FetchCounterPicks(enemyChampionID, role, 6)
+	if err != nil || len(counterPicks) == 0 {
+		fmt.Printf("No counter pick data vs %s: %v\n", enemyName, err)
+		runtime.EventsEmit(a.ctx, "counterpicks:update", map[string]interface{}{
+			"hasData":   true,
+			"enemyName": enemyName,
+			"enemyIcon": a.champions.GetIconURL(enemyChampionID),
+			"picks":     []map[string]interface{}{},
+		})
+		return
+	}
+
+	// Convert to frontend format
+	var pickList []map[string]interface{}
+	for _, m := range counterPicks {
+		champName := a.champions.GetName(m.EnemyChampionID)
+		pickList = append(pickList, map[string]interface{}{
+			"championID":   m.EnemyChampionID,
+			"championName": champName,
+			"iconURL":      a.champions.GetIconURL(m.EnemyChampionID),
+			"winRate":      m.WinRate,
+			"games":        m.Matches,
+		})
+	}
+
+	fmt.Printf("Counter picks vs %s: ", enemyName)
+	for _, p := range pickList {
+		fmt.Printf("%s (%.1f%%) ", p["championName"], p["winRate"])
+	}
+	fmt.Println()
+
+	runtime.EventsEmit(a.ctx, "counterpicks:update", map[string]interface{}{
+		"hasData":   true,
+		"enemyName": enemyName,
+		"enemyIcon": a.champions.GetIconURL(enemyChampionID),
+		"picks":     pickList,
+	})
+}
+
 // fetchAndEmitRecommendedBans fetches hardest counters and emits as recommended bans
 func (a *App) fetchAndEmitRecommendedBans(championID int, role string) {
 	championName := a.champions.GetName(championID)

@@ -830,6 +830,130 @@ body::before {
     text-shadow: 0 0 8px var(--status-lose-glow);
 }
 
+/* ============================================
+   Counter Picks Card
+   ============================================ */
+.counterpicks-card {
+    padding: 18px;
+    background: linear-gradient(180deg, rgba(13, 24, 41, 0.95) 0%, rgba(10, 14, 23, 0.98) 100%);
+    border: 1px solid var(--border-gold);
+    border-radius: 8px;
+    position: relative;
+    margin-top: 10px;
+}
+
+.counterpicks-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--status-win), transparent);
+    border-radius: 8px 8px 0 0;
+}
+
+.counterpicks-header {
+    font-family: 'Cinzel', serif;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--status-win);
+    margin-bottom: 4px;
+    text-shadow: 0 0 10px var(--status-win-glow);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.counterpicks-subheader {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    letter-spacing: 0.02em;
+}
+
+.counterpicks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.counterpick-row {
+    display: flex;
+    align-items: center;
+    padding: 12px 14px;
+    background: rgba(21, 34, 56, 0.6);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    gap: 14px;
+    transition: all var(--transition-normal);
+    position: relative;
+}
+
+.counterpick-row::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--status-win);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    border-radius: 6px 0 0 6px;
+}
+
+.counterpick-row:hover {
+    background: rgba(201, 162, 39, 0.08);
+    border-color: var(--border-gold);
+    transform: translateX(4px);
+}
+
+.counterpick-row:hover::before {
+    opacity: 1;
+}
+
+.counterpick-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 6px;
+    border: 2px solid var(--border-subtle);
+    transition: all var(--transition-fast);
+}
+
+.counterpick-row:hover .counterpick-icon {
+    border-color: var(--hextech-gold);
+    box-shadow: 0 0 12px var(--gold-glow);
+}
+
+.counterpick-name {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.counterpick-wr {
+    font-family: 'Cinzel', serif;
+    font-size: 14px;
+    font-weight: 700;
+    min-width: 52px;
+    text-align: right;
+}
+
+.counterpick-wr.winning {
+    color: var(--status-win);
+    text-shadow: 0 0 8px var(--status-win-glow);
+}
+
+.counterpick-games {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 30px;
+    text-align: right;
+}
+
 .content {
     flex: 1;
     display: flex;
@@ -1776,9 +1900,6 @@ body::before {
     gap: 10px;
     padding: 12px 14px;
     margin-top: 10px;
-    background: linear-gradient(180deg, rgba(13, 24, 41, 0.95) 0%, rgba(10, 14, 23, 0.98) 100%);
-    border: 1px solid var(--border-gold);
-    border-radius: 8px;
 }
 
 .details-counters-label {

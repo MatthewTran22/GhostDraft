@@ -43,6 +43,12 @@ document.querySelector('#app').innerHTML = `
                     <div class="bans-list" id="bans-list"></div>
                 </div>
 
+                <div class="counterpicks-card hidden" id="counterpicks-card">
+                    <div class="counterpicks-header">Counter Picks</div>
+                    <div class="counterpicks-subheader" id="counterpicks-subheader"></div>
+                    <div class="counterpicks-list" id="counterpicks-list"></div>
+                </div>
+
                 <div class="build-card hidden" id="build-card">
                     <div class="build-role" id="build-role"></div>
                     <div class="build-matchup">
@@ -95,6 +101,9 @@ const teamcompWarning = document.getElementById('teamcomp-warning');
 const bansCard = document.getElementById('bans-card');
 const bansSubheader = document.getElementById('bans-subheader');
 const bansList = document.getElementById('bans-list');
+const counterpicksCard = document.getElementById('counterpicks-card');
+const counterpicksSubheader = document.getElementById('counterpicks-subheader');
+const counterpicksList = document.getElementById('counterpicks-list');
 const buildCard = document.getElementById('build-card');
 const buildRole = document.getElementById('build-role');
 const buildWinrate = document.getElementById('build-winrate');
@@ -144,6 +153,8 @@ let selectedChampion = null; // { championId, role }
 
 // Tabs that are only visible during champ select
 const champSelectOnlyTabs = ['matchup', 'build', 'teamcomp'];
+// Tabs that are hidden during champ select
+const outsideChampSelectTabs = ['stats'];
 
 // Update tab visibility based on champ select state
 function updateTabVisibility(inChampSelect) {
@@ -155,6 +166,9 @@ function updateTabVisibility(inChampSelect) {
         if (champSelectOnlyTabs.includes(tabName)) {
             btn.classList.toggle('hidden', !inChampSelect);
         }
+        if (outsideChampSelectTabs.includes(tabName)) {
+            btn.classList.toggle('hidden', inChampSelect);
+        }
     });
 
     // If leaving champ select and current tab is a champ-select-only tab, switch to Stats
@@ -162,6 +176,14 @@ function updateTabVisibility(inChampSelect) {
         const statsBtn = document.querySelector('.tab-btn[data-tab="stats"]');
         if (statsBtn) {
             statsBtn.click();
+        }
+    }
+
+    // If entering champ select and current tab is stats, switch to Matchup
+    if (inChampSelect && activeTab && outsideChampSelectTabs.includes(activeTab.dataset.tab)) {
+        const matchupBtn = document.querySelector('.tab-btn[data-tab="matchup"]');
+        if (matchupBtn) {
+            matchupBtn.click();
         }
     }
 }
@@ -580,7 +602,18 @@ function updateChampSelect(data) {
         compWaiting.classList.remove('hidden');
         compAnalysis.classList.add('hidden');
         teamcompCard.classList.add('hidden');
+        bansCard.classList.add('hidden');
+        counterpicksCard.classList.add('hidden');
         return;
+    }
+
+    // Hide bans card when ban phase is complete, show counter picks
+    if (data.banPhaseComplete) {
+        bansCard.classList.add('hidden');
+        counterpicksCard.classList.remove('hidden');
+    } else {
+        bansCard.classList.remove('hidden');
+        counterpicksCard.classList.add('hidden');
     }
 }
 
@@ -742,6 +775,36 @@ function updateItems(data) {
     renderBuildsToContainer(buildSubtabs, buildContent, data.builds);
 }
 
+// Update counter picks (shown after ban phase)
+function updateCounterPicks(data) {
+    if (!data || !data.hasData) {
+        counterpicksSubheader.textContent = 'Waiting for enemy...';
+        counterpicksList.innerHTML = '<div class="no-data-msg">Not enough data</div>';
+        return;
+    }
+
+    counterpicksSubheader.textContent = data.enemyName ? `vs ${data.enemyName}` : '';
+
+    if (!data.picks || data.picks.length === 0) {
+        counterpicksList.innerHTML = '<div class="no-data-msg">Not enough data</div>';
+        return;
+    }
+
+    let html = '';
+    for (const pick of data.picks) {
+        const wr = typeof pick.winRate === 'number' ? pick.winRate.toFixed(1) : pick.winRate;
+        html += `
+            <div class="counterpick-row">
+                <img class="counterpick-icon" src="${pick.iconURL}" alt="${pick.championName}" />
+                <span class="counterpick-name">${pick.championName}</span>
+                <span class="counterpick-wr winning">${wr}%</span>
+                <span class="counterpick-games">${pick.games}</span>
+            </div>
+        `;
+    }
+    counterpicksList.innerHTML = html;
+}
+
 // Event listeners
 EventsOn('lcu:status', updateStatus);
 EventsOn('champselect:update', updateChampSelect);
@@ -750,6 +813,7 @@ EventsOn('bans:update', updateBans);
 EventsOn('teamcomp:update', updateTeamComp);
 EventsOn('fullcomp:update', updateFullComp);
 EventsOn('items:update', updateItems);
+EventsOn('counterpicks:update', updateCounterPicks);
 
 // Get initial status
 GetConnectionStatus()

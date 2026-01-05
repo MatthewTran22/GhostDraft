@@ -23,11 +23,12 @@ type App struct {
 	statsDB          *data.StatsDB   // SQLite database for stats
 	statsProvider    *stats.Provider // Stats queries (uses statsDB)
 	stopPoll         chan struct{}
-	lastFetchedChamp int
-	lastFetchedEnemy int
-	lastBanFetchKey  string
-	lastItemFetchKey string
-	windowVisible    bool
+	lastFetchedChamp    int
+	lastFetchedEnemy    int
+	lastBanFetchKey     string
+	lastItemFetchKey    string
+	lastCounterFetchKey string
+	windowVisible       bool
 }
 
 // NewApp creates a new App application struct

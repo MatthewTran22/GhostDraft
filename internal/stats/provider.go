@@ -434,6 +434,52 @@ func (p *Provider) FetchCounterMatchups(championID int, role string, limit int) 
 	return matchups, nil
 }
 
+// FetchCounterPicks returns champions that counter a specific enemy champion in a role
+// (i.e., champions with high win rate against the enemy)
+func (p *Provider) FetchCounterPicks(enemyChampionID int, role string, limit int) ([]MatchupStat, error) {
+	position := roleToPosition(role)
+
+	if limit <= 0 {
+		limit = 5
+	}
+
+	// Query champions that have high win rate against this enemy
+	// We flip the query - find champions where they beat the enemy
+	rows, err := p.db.Query(`
+		SELECT champion_id, SUM(wins) as wins, SUM(matches) as matches
+		FROM champion_matchups
+		WHERE enemy_champion_id = ? AND team_position = ?
+		GROUP BY champion_id
+		HAVING SUM(matches) >= 10
+		   AND (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) > 0.51
+		ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) DESC
+		LIMIT ?
+	`, enemyChampionID, position, limit)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query counter picks: %w", err)
+	}
+	defer rows.Close()
+
+	var matchups []MatchupStat
+	for rows.Next() {
+		var m MatchupStat
+		m.EnemyChampionID = enemyChampionID
+		var champID int
+		if err := rows.Scan(&champID, &m.Wins, &m.Matches); err != nil {
+			continue
+		}
+		if m.Matches > 0 {
+			m.WinRate = float64(m.Wins) / float64(m.Matches) * 100
+		}
+		// Store the counter pick champion ID in EnemyChampionID field (repurposed)
+		m.EnemyChampionID = champID
+		matchups = append(matchups, m)
+	}
+
+	return matchups, nil
+}
+
 // FetchTopChampionsByRole returns the top N champions by win rate for a given role
 func (p *Provider) FetchTopChampionsByRole(role string, limit int) ([]ChampionWinRate, error) {
 	position := roleToPosition(role)
