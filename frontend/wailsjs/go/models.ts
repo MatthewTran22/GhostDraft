@@ -164,7 +164,10 @@ export namespace main {
 	export class ChampionBuildData {
 	    hasItems: boolean;
 	    championName: string;
+	    championId: number;
 	    role: string;
+	    iconURL: string;
+	    splashURL: string;
 	    builds: BuildPath[];
 	
 	    static createFrom(source: any = {}) {
@@ -175,7 +178,10 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.hasItems = source["hasItems"];
 	        this.championName = source["championName"];
+	        this.championId = source["championId"];
 	        this.role = source["role"];
+	        this.iconURL = source["iconURL"];
+	        this.splashURL = source["splashURL"];
 	        this.builds = this.convertValues(source["builds"], BuildPath);
 	    }
 	

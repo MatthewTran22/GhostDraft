@@ -303,126 +303,76 @@ function loadChampionDetails(championId, role) {
     ]).then(([matchupData, buildData]) => {
         if (!matchupData.hasData && !buildData.hasItems) {
             detailsEl.innerHTML = `
-                <button class="details-back-btn" onclick="showMetaTierList()">← Back to Tier List</button>
+                <div class="details-header">
+                    <button class="details-back-btn" onclick="showMetaTierList()">←</button>
+                    <div class="details-header-text">
+                        <span class="details-champ-name">No Data</span>
+                    </div>
+                </div>
                 <div class="details-empty">No detailed data available</div>
             `;
             return;
         }
 
         const champName = matchupData.championName || buildData.championName;
+        const splashURL = buildData.splashURL || '';
 
         let html = `
-            <button class="details-back-btn" onclick="showMetaTierList()">← Back to Tier List</button>
-            <div class="details-header">${champName} <span class="details-role">${formatRole(role)}</span></div>
+            <div class="details-banner" style="background-image: url('${splashURL}');">
+                <div class="details-banner-overlay"></div>
+                <div class="details-banner-content">
+                    <div class="details-banner-header">
+                        <button class="details-back-btn" onclick="showMetaTierList()">←</button>
+                        <div class="details-banner-info">
+                            <span class="details-champ-name">${champName}</span>
+                            <span class="details-role">${formatRole(role)}</span>
+                        </div>
+                    </div>
+                    <div class="details-banner-build">
+                        <div class="build-subtabs hidden" id="details-build-subtabs"></div>
+                        <div class="build-content" id="details-build-content"></div>
+                    </div>
+                </div>
+            </div>
         `;
 
-        // Build section - reuse exact same format as Build tab
-        if (buildData.hasItems && buildData.builds && buildData.builds.length > 0) {
-            // Build subtabs
-            html += `<div class="details-build-subtabs" id="details-build-subtabs">`;
-            buildData.builds.forEach((build, idx) => {
-                const wr = build.winRate ? build.winRate.toFixed(1) : '?';
-                const wrClass = build.winRate >= 51 ? 'winning' : build.winRate <= 49 ? 'losing' : 'even';
-                html += `
-                    <button class="build-subtab ${idx === 0 ? 'active' : ''}" data-build-idx="${idx}">
-                        <span class="subtab-name">${build.name}</span>
-                        <span class="subtab-wr ${wrClass}">${wr}%</span>
-                        <span class="subtab-games">${build.games} games</span>
-                    </button>
-                `;
-            });
-            html += `</div>`;
-
-            // Build content container
-            html += `<div class="details-build-content" id="details-build-content"></div>`;
-        }
-
-        // Matchups section
-        if (matchupData.hasData) {
-            if (matchupData.counters && matchupData.counters.length > 0) {
-                html += `
-                    <div class="details-section">
-                        <div class="details-section-title">Countered By</div>
-                        <div class="details-matchups">
-                            ${matchupData.counters.slice(0, 5).map(m => `
-                                <div class="details-matchup bad">
-                                    <img class="details-matchup-icon" src="${m.iconURL}" alt="${m.championName}" title="${m.championName}" />
-                                    <span class="details-matchup-wr">${m.winRate.toFixed(0)}%</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (matchupData.goodMatchups && matchupData.goodMatchups.length > 0) {
-                html += `
-                    <div class="details-section">
-                        <div class="details-section-title">Strong Against</div>
-                        <div class="details-matchups">
-                            ${matchupData.goodMatchups.slice(0, 5).map(m => `
-                                <div class="details-matchup good">
-                                    <img class="details-matchup-icon" src="${m.iconURL}" alt="${m.championName}" title="${m.championName}" />
-                                    <span class="details-matchup-wr">${m.winRate.toFixed(0)}%</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                `;
-            }
-        }
+        // Counters row - show your WR against them (low = they counter you)
+        const counters = matchupData.counters || [];
+        html += `
+            <div class="details-counters-row">
+                <span class="details-counters-label">Counters</span>
+                <div class="details-counters-list">
+                    ${counters.length > 0
+                        ? counters.slice(0, 6).map(m => `
+                            <div class="details-counter">
+                                <img class="details-counter-icon" src="${m.iconURL}" alt="${m.championName}" title="${m.championName}" />
+                                <span class="details-counter-wr">${m.winRate.toFixed(0)}%</span>
+                                <span class="details-counter-games">${m.games} games</span>
+                            </div>
+                        `).join('')
+                        : '<span class="details-counters-empty">Not enough data</span>'
+                    }
+                </div>
+            </div>
+        `;
 
         detailsEl.innerHTML = html;
 
-        // Setup build subtab handlers and render first build
+        // Use the shared renderBuildsToContainer function - exact same as Build tab
         if (buildData.hasItems && buildData.builds && buildData.builds.length > 0) {
             const subtabsEl = document.getElementById('details-build-subtabs');
             const contentEl = document.getElementById('details-build-content');
-
-            // Render build content for a specific index
-            const renderDetailsBuild = (buildIdx) => {
-                const build = buildData.builds[buildIdx];
-                if (!build) {
-                    contentEl.innerHTML = '<div class="items-empty">No build data</div>';
-                    return;
-                }
-
-                contentEl.innerHTML = `
-                    <div class="items-section">
-                        <div class="items-header">Core Items</div>
-                        <div class="items-grid">${renderBasicItems(build.coreItems)}</div>
-                    </div>
-                    <div class="items-section">
-                        <div class="items-header">4th Item Options</div>
-                        <div class="items-grid">${renderItemsWithWR(build.fourthItems)}</div>
-                    </div>
-                    <div class="items-section">
-                        <div class="items-header">5th Item Options</div>
-                        <div class="items-grid">${renderItemsWithWR(build.fifthItems)}</div>
-                    </div>
-                    <div class="items-section">
-                        <div class="items-header">6th Item Options</div>
-                        <div class="items-grid">${renderItemsWithWR(build.sixthItems)}</div>
-                    </div>
-                `;
-            };
-
-            // Add click handlers for subtabs
-            subtabsEl.querySelectorAll('.build-subtab').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    subtabsEl.querySelectorAll('.build-subtab').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    renderDetailsBuild(parseInt(btn.dataset.buildIdx));
-                });
-            });
-
-            // Render first build
-            renderDetailsBuild(0);
+            renderBuildsToContainer(subtabsEl, contentEl, buildData.builds);
         }
     }).catch(err => {
         console.error('Failed to load champion details:', err);
         detailsEl.innerHTML = `
-            <button class="details-back-btn" onclick="showMetaTierList()">← Back to Tier List</button>
+            <div class="details-header">
+                <button class="details-back-btn" onclick="showMetaTierList()">←</button>
+                <div class="details-header-text">
+                    <span class="details-champ-name">Error</span>
+                </div>
+            </div>
             <div class="details-empty">Failed to load details</div>
         `;
     });
@@ -738,56 +688,28 @@ function updateFullComp(data) {
     `;
 }
 
-// Current builds data for sub-tab switching
+// Current builds data for sub-tab switching (used by Build tab)
 let currentBuildsData = null;
 
-// Update item build with multiple build paths
-function updateItems(data) {
-    if (!data || !data.hasItems || !data.builds || data.builds.length === 0) {
-        buildSubtabs.innerHTML = '';
-        buildContent.innerHTML = '<div class="items-empty">Select a champion...</div>';
-        currentBuildsData = null;
+// Shared function to render builds to any container
+// This is the single source of truth for build rendering - used by both Build tab and Meta details
+function renderBuildsToContainer(subtabsEl, contentEl, builds) {
+    // Hide subtabs - we only have one build
+    subtabsEl.innerHTML = '';
+    subtabsEl.classList.add('hidden');
+
+    if (!builds || builds.length === 0) {
+        contentEl.innerHTML = '<div class="items-empty">No build data</div>';
         return;
     }
 
-    currentBuildsData = data.builds;
-
-    // Render sub-tabs
-    buildSubtabs.innerHTML = data.builds.map((build, idx) => {
-        const wr = build.winRate ? build.winRate.toFixed(1) : '?';
-        const wrClass = build.winRate >= 51 ? 'winning' : build.winRate <= 49 ? 'losing' : 'even';
-        return `
-            <button class="build-subtab ${idx === 0 ? 'active' : ''}" data-build-idx="${idx}">
-                <span class="subtab-name">${build.name}</span>
-                <span class="subtab-wr ${wrClass}">${wr}%</span>
-                <span class="subtab-games">${build.games} games</span>
-            </button>
-        `;
-    }).join('');
-
-    // Add click handlers for sub-tabs
-    buildSubtabs.querySelectorAll('.build-subtab').forEach(btn => {
-        btn.addEventListener('click', () => {
-            buildSubtabs.querySelectorAll('.build-subtab').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            renderBuildContent(parseInt(btn.dataset.buildIdx));
-        });
-    });
-
-    // Render first build by default
-    renderBuildContent(0);
-}
-
-// Render content for a specific build path (uses shared helpers)
-function renderBuildContent(buildIdx) {
-    if (!currentBuildsData || !currentBuildsData[buildIdx]) {
-        buildContent.innerHTML = '<div class="items-empty">No build data</div>';
+    const build = builds[0];
+    if (!build) {
+        contentEl.innerHTML = '<div class="items-empty">No build data</div>';
         return;
     }
 
-    const build = currentBuildsData[buildIdx];
-
-    buildContent.innerHTML = `
+    contentEl.innerHTML = `
         <div class="items-section">
             <div class="items-header">Core Items</div>
             <div class="items-grid">${renderBasicItems(build.coreItems)}</div>
@@ -805,6 +727,19 @@ function renderBuildContent(buildIdx) {
             <div class="items-grid">${renderItemsWithWR(build.sixthItems)}</div>
         </div>
     `;
+}
+
+// Update item build with multiple build paths (Build tab during champ select)
+function updateItems(data) {
+    if (!data || !data.hasItems || !data.builds || data.builds.length === 0) {
+        buildSubtabs.innerHTML = '';
+        buildContent.innerHTML = '<div class="items-empty">Select a champion...</div>';
+        currentBuildsData = null;
+        return;
+    }
+
+    currentBuildsData = data.builds;
+    renderBuildsToContainer(buildSubtabs, buildContent, data.builds);
 }
 
 // Event listeners

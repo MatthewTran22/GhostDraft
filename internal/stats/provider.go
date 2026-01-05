@@ -151,16 +151,19 @@ func (p *Provider) FetchChampionData(championID int, championName string, role s
 
 // constructBuildPathFromSlots creates a build path using item slot data
 func (p *Provider) constructBuildPathFromSlots(championID int, position string, totalGames int) (BuildPath, error) {
+	// Track excluded items (already used in build)
+	excluded := make(map[int]bool)
+
 	// Query items for each slot, ordered by matches (popularity)
-	getSlotItems := func(slot int, limit int) ([]ItemOption, error) {
+	// Excludes boots and any items in the excluded map
+	getSlotItems := func(slot int, limit int, excludeBoots bool) ([]ItemOption, error) {
 		rows, err := p.db.Query(`
 			SELECT item_id, SUM(wins) as wins, SUM(matches) as matches
 			FROM champion_item_slots
 			WHERE champion_id = ? AND team_position = ? AND build_slot = ?
 			GROUP BY item_id
 			ORDER BY SUM(matches) DESC
-			LIMIT ?
-		`, championID, position, slot, limit)
+		`, championID, position, slot)
 		if err != nil {
 			return nil, err
 		}
@@ -173,36 +176,79 @@ func (p *Provider) constructBuildPathFromSlots(championID int, position string, 
 				continue
 			}
 			if matches > 0 {
+				// Skip excluded items (duplicates)
+				if excluded[itemID] {
+					continue
+				}
+				// Skip boots if requested
+				if excludeBoots && isBootsItem(itemID) {
+					continue
+				}
+				// Skip starting items
+				if isStartingItem(itemID) {
+					continue
+				}
 				items = append(items, ItemOption{
 					ItemID:  itemID,
 					WinRate: float64(wins) / float64(matches) * 100,
 					Games:   matches,
 				})
+				if len(items) >= limit {
+					break
+				}
 			}
 		}
 		return items, nil
 	}
 
-	// Get core items (slots 1, 2, 3 - top item from each)
+	// Get best boots across all slots
+	var bestBoots int
+	bootsRow := p.db.QueryRow(`
+		SELECT item_id
+		FROM champion_item_slots
+		WHERE champion_id = ? AND team_position = ?
+		AND item_id IN (3006, 3009, 3020, 3047, 3111, 3117, 3158)
+		GROUP BY item_id
+		ORDER BY SUM(matches) DESC
+		LIMIT 1
+	`, championID, position)
+	bootsRow.Scan(&bestBoots)
+
+	// Get 2 core items (slots 1, 2, 3 - excluding boots and duplicates)
 	var coreItemIDs []int
 	var winRate float64
 	for slot := 1; slot <= 3; slot++ {
-		items, err := getSlotItems(slot, 1)
+		if len(coreItemIDs) >= 2 {
+			break
+		}
+		items, err := getSlotItems(slot, 1, true) // exclude boots
 		if err != nil {
 			continue
 		}
 		if len(items) > 0 {
 			coreItemIDs = append(coreItemIDs, items[0].ItemID)
-			if slot == 1 {
+			excluded[items[0].ItemID] = true
+			if len(coreItemIDs) == 1 {
 				winRate = items[0].WinRate
 			}
 		}
 	}
 
-	// Get 4th, 5th, 6th item options (2 choices each)
-	fourthItems, _ := getSlotItems(4, 2)
-	fifthItems, _ := getSlotItems(5, 2)
-	sixthItems, _ := getSlotItems(6, 2)
+	// Add best boots to core items
+	if bestBoots > 0 {
+		coreItemIDs = append(coreItemIDs, bestBoots)
+		excluded[bestBoots] = true
+	}
+
+	// Mark all boots as excluded for later slots
+	for _, bootsID := range []int{3006, 3009, 3020, 3047, 3111, 3117, 3158} {
+		excluded[bootsID] = true
+	}
+
+	// Get 4th, 5th, 6th item options (3 choices each, excluding core and boots)
+	fourthItems, _ := getSlotItems(4, 3, true)
+	fifthItems, _ := getSlotItems(5, 3, true)
+	sixthItems, _ := getSlotItems(6, 3, true)
 
 	return BuildPath{
 		Name:              "Recommended Build",
@@ -356,13 +402,14 @@ func (p *Provider) FetchCounterMatchups(championID int, role string, limit int) 
 	}
 
 	// Query matchups ordered by lowest win rate (hardest counters first)
-	// Aggregate across all patches, require at least 100 games for statistical significance
+	// Only include matchups where win rate < 49% (true counters)
 	rows, err := p.db.Query(`
 		SELECT enemy_champion_id, SUM(wins) as wins, SUM(matches) as matches
 		FROM champion_matchups
 		WHERE champion_id = ? AND team_position = ?
 		GROUP BY enemy_champion_id
-		HAVING SUM(matches) >= 20
+		HAVING SUM(matches) >= 10
+		   AND (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) < 0.49
 		ORDER BY (CAST(SUM(wins) AS REAL) / CAST(SUM(matches) AS REAL)) ASC
 		LIMIT ?
 	`, championID, position, limit)

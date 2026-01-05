@@ -412,20 +412,26 @@ type BuildPath struct {
 type ChampionBuildData struct {
 	HasItems     bool        `json:"hasItems"`
 	ChampionName string      `json:"championName"`
+	ChampionID   int         `json:"championId"`
 	Role         string      `json:"role"`
+	IconURL      string      `json:"iconURL"`
+	SplashURL    string      `json:"splashURL"`
 	Builds       []BuildPath `json:"builds"`
 }
 
 // GetChampionBuild returns build data for a champion in the same format as items:update
 func (a *App) GetChampionBuild(championID int, role string) ChampionBuildData {
 	result := ChampionBuildData{
-		HasItems: false,
-		Builds:   []BuildPath{},
+		HasItems:   false,
+		ChampionID: championID,
+		Builds:     []BuildPath{},
 	}
 
 	champName := a.champions.GetName(championID)
 	result.ChampionName = champName
 	result.Role = role
+	result.IconURL = a.champions.GetIconURL(championID)
+	result.SplashURL = a.champions.GetSplashURL(championID)
 
 	if a.statsProvider == nil {
 		return result
@@ -558,17 +564,16 @@ func (a *App) GetChampionDetails(championID int, role string) ChampionDetails {
 		}
 	}
 
-	// Fetch matchups
-	allMatchups, err := a.statsProvider.FetchAllMatchups(championID, role)
-	if err == nil && len(allMatchups) > 0 {
-		result.HasData = true
-
-		// Sort by win rate to get counters (lowest) and good matchups (highest)
-		// Counters - lowest win rate (they counter you)
-		counters, _ := a.statsProvider.FetchCounterMatchups(championID, role, 5)
+	// Fetch counters (champions that beat you) - separate from allMatchups
+	counters, err := a.statsProvider.FetchCounterMatchups(championID, role, 6)
+	if err != nil {
+		fmt.Printf("Failed to fetch counters for %s: %v\n", champName, err)
+	} else {
+		fmt.Printf("Fetched %d counters for %s:\n", len(counters), champName)
 		for _, m := range counters {
 			enemyName := a.champions.GetName(m.EnemyChampionID)
 			iconURL := a.champions.GetIconURL(m.EnemyChampionID)
+			fmt.Printf("  - %s: %.1f%% WR (%d games)\n", enemyName, m.WinRate, m.Matches)
 			result.Counters = append(result.Counters, ChampionDetailMatchup{
 				ChampionID:   m.EnemyChampionID,
 				ChampionName: enemyName,
@@ -577,8 +582,16 @@ func (a *App) GetChampionDetails(championID int, role string) ChampionDetails {
 				Games:        m.Matches,
 			})
 		}
+		if len(counters) > 0 {
+			result.HasData = true
+		}
+	}
 
-		// Good matchups - highest win rate (you counter them)
+	// Fetch good matchups (champions you beat)
+	allMatchups, err := a.statsProvider.FetchAllMatchups(championID, role)
+	if err == nil && len(allMatchups) > 0 {
+		result.HasData = true
+
 		// Sort allMatchups by win rate descending
 		for i := 0; i < len(allMatchups); i++ {
 			for j := i + 1; j < len(allMatchups); j++ {
