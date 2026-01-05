@@ -280,6 +280,7 @@ func (s *StatsDB) downloadAndImport(dataURL, expectedSha256, manifestVersion str
 }
 
 // ImportData bulk inserts data into SQLite using a single transaction
+// Uses upsert to accumulate data instead of replacing
 func (s *StatsDB) ImportData(data *DataExport, version string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -287,24 +288,13 @@ func (s *StatsDB) ImportData(data *DataExport, version string) error {
 	}
 	defer tx.Rollback() // Safe to call even after Commit()
 
-	// Clear ALL existing data - this is a full refresh
-	if _, err := tx.Exec("DELETE FROM champion_stats"); err != nil {
-		return fmt.Errorf("failed to clear champion_stats: %w", err)
-	}
-	if _, err := tx.Exec("DELETE FROM champion_items"); err != nil {
-		return fmt.Errorf("failed to clear champion_items: %w", err)
-	}
-	if _, err := tx.Exec("DELETE FROM champion_item_slots"); err != nil {
-		return fmt.Errorf("failed to clear champion_item_slots: %w", err)
-	}
-	if _, err := tx.Exec("DELETE FROM champion_matchups"); err != nil {
-		return fmt.Errorf("failed to clear champion_matchups: %w", err)
-	}
-
-	// Insert champion_stats using prepared statement
+	// Upsert champion_stats - add to existing values on conflict
 	stmtStats, err := tx.Prepare(`
 		INSERT INTO champion_stats (patch, champion_id, team_position, wins, matches)
 		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(patch, champion_id, team_position) DO UPDATE SET
+			wins = wins + excluded.wins,
+			matches = matches + excluded.matches
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare champion_stats statement: %w", err)
@@ -317,10 +307,13 @@ func (s *StatsDB) ImportData(data *DataExport, version string) error {
 		}
 	}
 
-	// Insert champion_items using prepared statement
+	// Upsert champion_items - add to existing values on conflict
 	stmtItems, err := tx.Prepare(`
 		INSERT INTO champion_items (patch, champion_id, team_position, item_id, wins, matches)
 		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(patch, champion_id, team_position, item_id) DO UPDATE SET
+			wins = wins + excluded.wins,
+			matches = matches + excluded.matches
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare champion_items statement: %w", err)
@@ -333,10 +326,13 @@ func (s *StatsDB) ImportData(data *DataExport, version string) error {
 		}
 	}
 
-	// Insert champion_item_slots using prepared statement
+	// Upsert champion_item_slots - add to existing values on conflict
 	stmtItemSlots, err := tx.Prepare(`
 		INSERT INTO champion_item_slots (patch, champion_id, team_position, item_id, build_slot, wins, matches)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(patch, champion_id, team_position, item_id, build_slot) DO UPDATE SET
+			wins = wins + excluded.wins,
+			matches = matches + excluded.matches
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare champion_item_slots statement: %w", err)
@@ -349,10 +345,13 @@ func (s *StatsDB) ImportData(data *DataExport, version string) error {
 		}
 	}
 
-	// Insert champion_matchups using prepared statement
+	// Upsert champion_matchups - add to existing values on conflict
 	stmtMatchups, err := tx.Prepare(`
 		INSERT INTO champion_matchups (patch, champion_id, team_position, enemy_champion_id, wins, matches)
 		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(patch, champion_id, team_position, enemy_champion_id) DO UPDATE SET
+			wins = wins + excluded.wins,
+			matches = matches + excluded.matches
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare champion_matchups statement: %w", err)
@@ -378,7 +377,7 @@ func (s *StatsDB) ImportData(data *DataExport, version string) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	fmt.Printf("[Stats] Imported: %d champion stats, %d item stats, %d item slot stats, %d matchup stats\n",
+	fmt.Printf("[Stats] Accumulated: %d champion stats, %d item stats, %d item slot stats, %d matchup stats\n",
 		len(data.ChampionStats), len(data.ChampionItems), len(data.ChampionItemSlots), len(data.ChampionMatchups))
 
 	return nil

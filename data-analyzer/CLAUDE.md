@@ -230,7 +230,8 @@ CREATE TABLE champion_matchups (
 1. **Spider/Snowball approach**: Start with 1 player, discover others from their matches
 2. **In-memory deduplication**: Track visitedMatchIDs to avoid re-fetching
 3. **Rate limiting**: 15 req/sec, 90 req/2min (conservative under Riot's 20/100 limits)
-4. **Graceful shutdown**: Ctrl+C flushes current file to warm/
+4. **2 API calls per match**: Match details + timeline (for build order extraction)
+5. **Graceful shutdown**: Ctrl+C flushes current file to warm/
 
 ## Collector Options
 ```bash
@@ -246,6 +247,9 @@ go run cmd/collector/main.go \
 1. **Account Lookup**: `/riot/account/v1/accounts/by-riot-id/{gameName}/{tagLine}`
 2. **Match History**: `/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420&count=20`
 3. **Match Details**: `/lol/match/v5/matches/{matchId}`
+4. **Match Timeline**: `/lol/match/v5/matches/{matchId}/timeline` (for build order)
+
+**Note**: Each match requires 2 API calls (details + timeline), so collection time is roughly doubled compared to details-only.
 
 ## Rate Limits (Dev Key)
 - 20 requests/second
