@@ -7,3 +7,6 @@ frontend/dist
 .env
 *.env
 data-analyzer/.env
+
+# Collected match data
+data-analyzer/data/
