@@ -45,11 +45,12 @@ export default function PrivacyPolicy() {
           <ul className="list-disc list-inside text-[var(--text-secondary)] space-y-2 mb-4 ml-4">
             <li>Local only - no data is sent to our servers</li>
             <li>Read-only - we cannot modify your client or account</li>
-            <li>Temporary - data is only used during your champion select session</li>
+            <li>Ephemeral - data is only held in memory while the app is running, never saved to disk</li>
           </ul>
           <p className="text-[var(--text-secondary)] leading-relaxed">
-            Information accessed includes: current champion select state, your selected champion,
-            teammates&apos; selected champions, and enemy team&apos;s selected champions (when visible).
+            Information accessed includes: current champion select state, selected champions,
+            and your recent match history (for personal stats display). This data stays on your
+            computer and is never transmitted externally.
           </p>
         </section>
 
