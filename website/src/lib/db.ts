@@ -185,25 +185,25 @@ function importData(data: DataExport, version: string): void {
   const database = getDb();
 
   const transaction = database.transaction(() => {
-    // Clear existing data
-    database.prepare("DELETE FROM champion_stats").run();
-    database.prepare("DELETE FROM champion_items").run();
-    database.prepare("DELETE FROM champion_item_slots").run();
-    database.prepare("DELETE FROM champion_matchups").run();
-
-    // Insert champion_stats
+    // Upsert champion_stats - add to existing values on conflict
     const insertStats = database.prepare(`
       INSERT INTO champion_stats (patch, champion_id, team_position, wins, matches)
       VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(patch, champion_id, team_position) DO UPDATE SET
+        wins = wins + excluded.wins,
+        matches = matches + excluded.matches
     `);
     for (const stat of data.championStats || []) {
       insertStats.run(stat.patch, stat.championId, stat.teamPosition, stat.wins, stat.matches);
     }
 
-    // Insert champion_items
+    // Upsert champion_items - add to existing values on conflict
     const insertItems = database.prepare(`
       INSERT INTO champion_items (patch, champion_id, team_position, item_id, wins, matches)
       VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(patch, champion_id, team_position, item_id) DO UPDATE SET
+        wins = wins + excluded.wins,
+        matches = matches + excluded.matches
     `);
     for (const item of data.championItems || []) {
       insertItems.run(
@@ -216,10 +216,13 @@ function importData(data: DataExport, version: string): void {
       );
     }
 
-    // Insert champion_item_slots
+    // Upsert champion_item_slots - add to existing values on conflict
     const insertSlots = database.prepare(`
       INSERT INTO champion_item_slots (patch, champion_id, team_position, item_id, build_slot, wins, matches)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(patch, champion_id, team_position, item_id, build_slot) DO UPDATE SET
+        wins = wins + excluded.wins,
+        matches = matches + excluded.matches
     `);
     for (const slot of data.championItemSlots || []) {
       insertSlots.run(
@@ -233,10 +236,13 @@ function importData(data: DataExport, version: string): void {
       );
     }
 
-    // Insert champion_matchups
+    // Upsert champion_matchups - add to existing values on conflict
     const insertMatchups = database.prepare(`
       INSERT INTO champion_matchups (patch, champion_id, team_position, enemy_champion_id, wins, matches)
       VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(patch, champion_id, team_position, enemy_champion_id) DO UPDATE SET
+        wins = wins + excluded.wins,
+        matches = matches + excluded.matches
     `);
     for (const matchup of data.championMatchups || []) {
       insertMatchups.run(
@@ -261,7 +267,7 @@ function importData(data: DataExport, version: string): void {
   transaction();
 
   console.log(
-    `[Stats] Imported: ${data.championStats?.length || 0} champion stats, ` +
+    `[Stats] Accumulated: ${data.championStats?.length || 0} champion stats, ` +
       `${data.championItems?.length || 0} item stats, ` +
       `${data.championItemSlots?.length || 0} item slot stats, ` +
       `${data.championMatchups?.length || 0} matchup stats`
