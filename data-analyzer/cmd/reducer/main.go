@@ -6,7 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	json "github.com/goccy/go-json"
 	"flag"
 	"fmt"
 	"io"
@@ -429,17 +429,16 @@ func aggregateFile(filePath string) (map[ChampionStatsKey]*ChampionStats, map[It
 			championStats[champKey].Wins++
 		}
 
-		// Aggregate item stats from build order (purchase order, not final inventory)
-		// This gives better stats on what items players actually build
+		// ITEM STATS: Always use final inventory (item0-5) for 100% of matches
+		// This ensures accurate item win rates across all games
+		finalItems := []int{match.Item0, match.Item1, match.Item2, match.Item3, match.Item4, match.Item5}
 		seenItems := make(map[int]bool)
-		buildSlot := 0
-		for _, itemID := range match.BuildOrder {
+		for _, itemID := range finalItems {
 			// Skip empty, duplicates, and non-completed items
 			if itemID == 0 || seenItems[itemID] || !isCompletedItem(itemID) {
 				continue
 			}
 			seenItems[itemID] = true
-			buildSlot++
 
 			// Regular item stats (which items are built)
 			itemKey := ItemStatsKey{
@@ -456,24 +455,40 @@ func aggregateFile(filePath string) (map[ChampionStatsKey]*ChampionStats, map[It
 			if match.Win {
 				itemStats[itemKey].Wins++
 			}
+		}
 
-			// Item slot stats (which items are built in which slot)
-			// Only track slots 1-6
-			if buildSlot <= 6 {
-				slotKey := ItemSlotStatsKey{
-					Patch:        patch,
-					ChampionID:   match.ChampionID,
-					TeamPosition: match.TeamPosition,
-					ItemID:       itemID,
-					BuildSlot:    buildSlot,
+		// ITEM SLOT STATS: Only process when BuildOrder exists (sampled matches)
+		// BuildOrder comes from timeline data, which is only fetched for ~20% of matches
+		// This gives us accurate build path statistics without fetching timeline for every game
+		if len(match.BuildOrder) > 0 {
+			seenSlotItems := make(map[int]bool)
+			buildSlot := 0
+			for _, itemID := range match.BuildOrder {
+				// Skip empty, duplicates, and non-completed items
+				if itemID == 0 || seenSlotItems[itemID] || !isCompletedItem(itemID) {
+					continue
 				}
+				seenSlotItems[itemID] = true
+				buildSlot++
 
-				if _, exists := itemSlotStats[slotKey]; !exists {
-					itemSlotStats[slotKey] = &ItemSlotStats{}
-				}
-				itemSlotStats[slotKey].Matches++
-				if match.Win {
-					itemSlotStats[slotKey].Wins++
+				// Item slot stats (which items are built in which slot)
+				// Only track slots 1-6
+				if buildSlot <= 6 {
+					slotKey := ItemSlotStatsKey{
+						Patch:        patch,
+						ChampionID:   match.ChampionID,
+						TeamPosition: match.TeamPosition,
+						ItemID:       itemID,
+						BuildSlot:    buildSlot,
+					}
+
+					if _, exists := itemSlotStats[slotKey]; !exists {
+						itemSlotStats[slotKey] = &ItemSlotStats{}
+					}
+					itemSlotStats[slotKey].Matches++
+					if match.Win {
+						itemSlotStats[slotKey].Wins++
+					}
 				}
 			}
 		}
@@ -822,7 +837,7 @@ func pushToTurso(patch, minPatch string,
 
 	ctx := context.Background()
 
-	// Create tables if they don't exist
+	// Create tables if they don't exist (without indexes for bulk loading)
 	fmt.Println("Creating tables...")
 	if err := client.CreateTables(ctx); err != nil {
 		return "", fmt.Errorf("failed to create tables: %w", err)
@@ -835,6 +850,11 @@ func pushToTurso(patch, minPatch string,
 	}
 	nextVersion := calculateNextVersion(currentVersion, patch)
 	fmt.Printf("Version: %s -> %s\n", currentVersion, nextVersion)
+
+	// Drop indexes for faster bulk inserts
+	if err := client.DropIndexes(ctx); err != nil {
+		fmt.Printf("Warning: failed to drop indexes: %v\n", err)
+	}
 
 	// Set data version with build number
 	fmt.Println("Setting data version...")
@@ -908,6 +928,11 @@ func pushToTurso(patch, minPatch string,
 	}
 	if err := client.InsertChampionMatchups(ctx, matchupStatsList); err != nil {
 		return "", fmt.Errorf("failed to insert champion matchups: %w", err)
+	}
+
+	// Recreate indexes after bulk inserts
+	if err := client.CreateIndexes(ctx); err != nil {
+		return "", fmt.Errorf("failed to create indexes: %w", err)
 	}
 
 	// Clean up old patches

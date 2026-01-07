@@ -6,7 +6,6 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 document.querySelector('#app').innerHTML = `
     <div class="overlay-box" id="overlay-box">
         <div class="header drag-region">
-            <img src="assets/images/logo.png" alt="GhostDraft" class="header-logo">
             <h1>GhostDraft</h1>
         </div>
 

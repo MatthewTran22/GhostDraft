@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+
+	json "github.com/goccy/go-json"
 
 	"data-analyzer/internal/db"
 

@@ -709,12 +709,6 @@ body::before {
     overflow: hidden;
 }
 
-.header-logo {
-    width: 32px;
-    height: 32px;
-    filter: drop-shadow(0 0 8px rgba(201, 162, 39, 0.6));
-}
-
 .header::before {
     content: '';
     position: absolute;

@@ -201,21 +201,10 @@ func main() {
 			}
 			currentPatchMatches++
 
-			// Fetch timeline for build order
-			timeline, err := client.GetTimeline(ctx, matchID)
-			if err != nil {
-				log.Printf("    Failed to fetch timeline (continuing without build order): %v", err)
-				timeline = nil
-			}
-
 			// Write each participant as a separate record
+			// NOTE: Timeline fetch removed for 2x speed improvement
+			// Using final inventory (item0-5) instead of build order from timeline
 			for _, participant := range match.Info.Participants {
-				// Extract build order from timeline if available
-				var buildOrder []int
-				if timeline != nil {
-					buildOrder = riot.ExtractBuildOrder(timeline, participant.ParticipantID)
-				}
-
 				rawMatch := &storage.RawMatch{
 					MatchID:      matchID,
 					GameVersion:  match.Info.GameVersion,
@@ -234,7 +223,6 @@ func main() {
 					Item3:        participant.Item3,
 					Item4:        participant.Item4,
 					Item5:        participant.Item5,
-					BuildOrder:   buildOrder,
 				}
 
 				if err := rotator.WriteLine(rawMatch); err != nil {

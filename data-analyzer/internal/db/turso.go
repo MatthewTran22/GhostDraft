@@ -44,7 +44,7 @@ func (c *TursoClient) Close() error {
 	return c.db.Close()
 }
 
-// CreateTables creates the required tables if they don't exist
+// CreateTables creates the required tables if they don't exist (without indexes for bulk loading)
 func (c *TursoClient) CreateTables(ctx context.Context) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS data_version (
@@ -88,14 +88,7 @@ func (c *TursoClient) CreateTables(ctx context.Context) error {
 			matches INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (patch, champion_id, team_position, enemy_champion_id)
 		)`,
-		// Indexes
-		`CREATE INDEX IF NOT EXISTS idx_champion_stats_position ON champion_stats(team_position)`,
-		`CREATE INDEX IF NOT EXISTS idx_champion_stats_champ_pos ON champion_stats(champion_id, team_position)`,
-		`CREATE INDEX IF NOT EXISTS idx_champion_items_champ_pos ON champion_items(champion_id, team_position)`,
-		`CREATE INDEX IF NOT EXISTS idx_champion_item_slots_champ_pos ON champion_item_slots(champion_id, team_position)`,
-		`CREATE INDEX IF NOT EXISTS idx_champion_item_slots_champ_pos_slot ON champion_item_slots(champion_id, team_position, build_slot)`,
-		`CREATE INDEX IF NOT EXISTS idx_champion_matchups_champ_pos ON champion_matchups(champion_id, team_position)`,
-		`CREATE INDEX IF NOT EXISTS idx_champion_matchups_enemy ON champion_matchups(champion_id, team_position, enemy_champion_id)`,
+		// Note: Indexes are created separately via CreateIndexes() for bulk loading optimization
 	}
 
 	for _, query := range queries {
@@ -105,6 +98,14 @@ func (c *TursoClient) CreateTables(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// CreateTablesWithIndexes creates tables and indexes (for normal operation, not bulk loading)
+func (c *TursoClient) CreateTablesWithIndexes(ctx context.Context) error {
+	if err := c.CreateTables(ctx); err != nil {
+		return err
+	}
+	return c.CreateIndexes(ctx)
 }
 
 // ClearData deletes all existing data using a single batched transaction
@@ -173,7 +174,7 @@ type ChampionMatchup struct {
 	Matches         int
 }
 
-const batchSize = 100
+const batchSize = 500 // Increased for bulk loading performance
 
 // InsertChampionStats inserts champion stats using multi-value INSERT
 func (c *TursoClient) InsertChampionStats(ctx context.Context, stats []ChampionStat) error {
@@ -355,6 +356,53 @@ func (c *TursoClient) GetDataVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return version, nil
+}
+
+// Index definitions for bulk loading optimization
+var indexDefinitions = []string{
+	`CREATE INDEX IF NOT EXISTS idx_champion_stats_position ON champion_stats(team_position)`,
+	`CREATE INDEX IF NOT EXISTS idx_champion_stats_champ_pos ON champion_stats(champion_id, team_position)`,
+	`CREATE INDEX IF NOT EXISTS idx_champion_items_champ_pos ON champion_items(champion_id, team_position)`,
+	`CREATE INDEX IF NOT EXISTS idx_champion_item_slots_champ_pos ON champion_item_slots(champion_id, team_position)`,
+	`CREATE INDEX IF NOT EXISTS idx_champion_item_slots_champ_pos_slot ON champion_item_slots(champion_id, team_position, build_slot)`,
+	`CREATE INDEX IF NOT EXISTS idx_champion_matchups_champ_pos ON champion_matchups(champion_id, team_position)`,
+	`CREATE INDEX IF NOT EXISTS idx_champion_matchups_enemy ON champion_matchups(champion_id, team_position, enemy_champion_id)`,
+}
+
+var indexNames = []string{
+	"idx_champion_stats_position",
+	"idx_champion_stats_champ_pos",
+	"idx_champion_items_champ_pos",
+	"idx_champion_item_slots_champ_pos",
+	"idx_champion_item_slots_champ_pos_slot",
+	"idx_champion_matchups_champ_pos",
+	"idx_champion_matchups_enemy",
+}
+
+// DropIndexes drops all indexes for faster bulk inserts
+func (c *TursoClient) DropIndexes(ctx context.Context) error {
+	fmt.Println("Dropping indexes for bulk loading...")
+	for _, name := range indexNames {
+		query := fmt.Sprintf("DROP INDEX IF EXISTS %s", name)
+		if _, err := c.db.ExecContext(ctx, query); err != nil {
+			// Log but don't fail - index might not exist
+			fmt.Printf("  Warning: failed to drop index %s: %v\n", name, err)
+		}
+	}
+	fmt.Printf("  Dropped %d indexes\n", len(indexNames))
+	return nil
+}
+
+// CreateIndexes creates all indexes after bulk insert
+func (c *TursoClient) CreateIndexes(ctx context.Context) error {
+	fmt.Println("Creating indexes after bulk load...")
+	for _, query := range indexDefinitions {
+		if _, err := c.db.ExecContext(ctx, query); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+	}
+	fmt.Printf("  Created %d indexes\n", len(indexDefinitions))
+	return nil
 }
 
 // DeleteOldPatches removes data from patches older than minPatch using a single transaction

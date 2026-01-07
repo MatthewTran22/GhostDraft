@@ -234,6 +234,10 @@
                     <span class="status-label">Storage:</span>
                     <span class="status-value {{if eq .StoragePath ""}}warning{{else}}{{end}}">{{if .StoragePath}}{{.StoragePath}}{{else}}Not set{{end}}</span>
                 </div>
+                <div class="status-item">
+                    <span class="status-label">Turso:</span>
+                    <span class="status-value {{if eq .TursoURL "Not set"}}warning{{end}}">{{.TursoURL}}</span>
+                </div>
             </div>
         </div>
 

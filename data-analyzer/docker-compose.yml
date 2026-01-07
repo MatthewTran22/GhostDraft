@@ -9,22 +9,8 @@ services:
     environment:
       - RIOT_API_KEY=${RIOT_API_KEY}
       - BLOB_STORAGE_PATH=/app/data
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
     volumes:
       - ./data:/app/data
       - ./export:/app/export
-
-  postgres:
-    image: postgres:15-alpine
-    container_name: lol-analyzer-db
-    environment:
-      POSTGRES_USER: analyzer
-      POSTGRES_PASSWORD: analyzer123
-      POSTGRES_DB: lol_matches
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./internal/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-
-volumes:
-  pgdata:

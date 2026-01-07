@@ -11,9 +11,10 @@ const minGamesForCurrentPatch = 1000
 
 // ItemOption holds item ID with win rate
 type ItemOption struct {
-	ItemID  int
-	WinRate float64
-	Games   int
+	ItemID   int
+	WinRate  float64
+	PickRate float64 // % of games this item was chosen in this slot (calculated from sampled data)
+	Games    int
 }
 
 // BuildPath represents a single build path
@@ -157,10 +158,15 @@ func (p *StatsProvider) constructBuildPathFromSlots(championID int, position str
 	excluded := make(map[int]bool)
 
 	// Query items for each slot, ordered by matches (popularity)
+	// Uses window function to calculate pick_rate from sampled data (avoids denominator trap)
 	// Excludes boots and any items in the excluded map
 	getSlotItems := func(slot int, limit int, excludeBoots bool) ([]ItemOption, error) {
 		rows, err := p.db.Query(`
-			SELECT item_id, SUM(wins) as wins, SUM(matches) as matches
+			SELECT
+				item_id,
+				SUM(wins) as wins,
+				SUM(matches) as matches,
+				CAST(SUM(matches) AS REAL) / SUM(SUM(matches)) OVER () * 100 as pick_rate
 			FROM champion_item_slots
 			WHERE champion_id = ? AND team_position = ? AND build_slot = ?
 			GROUP BY item_id
@@ -174,7 +180,8 @@ func (p *StatsProvider) constructBuildPathFromSlots(championID int, position str
 		var items []ItemOption
 		for rows.Next() {
 			var itemID, wins, matches int
-			if err := rows.Scan(&itemID, &wins, &matches); err != nil {
+			var pickRate float64
+			if err := rows.Scan(&itemID, &wins, &matches, &pickRate); err != nil {
 				continue
 			}
 			if matches > 0 {
@@ -191,9 +198,10 @@ func (p *StatsProvider) constructBuildPathFromSlots(championID int, position str
 					continue
 				}
 				items = append(items, ItemOption{
-					ItemID:  itemID,
-					WinRate: float64(wins) / float64(matches) * 100,
-					Games:   matches,
+					ItemID:   itemID,
+					WinRate:  float64(wins) / float64(matches) * 100,
+					PickRate: pickRate,
+					Games:    matches,
 				})
 				if len(items) >= limit {
 					break

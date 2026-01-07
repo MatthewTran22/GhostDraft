@@ -8,6 +8,7 @@ const MIN_GAMES_FOR_CURRENT_PATCH = 1000;
 export interface ItemOption {
   itemId: number;
   winRate: number;
+  pickRate: number; // % of games this item was chosen in this slot (calculated from sampled data)
   games: number;
 }
 
@@ -94,6 +95,7 @@ async function constructBuildPathFromSlots(
 ): Promise<BuildPath> {
   const client = getDb();
 
+  // Uses window function to calculate pick_rate from sampled data (avoids denominator trap)
   const getSlotItems = async (
     slot: number,
     limit: number,
@@ -109,7 +111,11 @@ async function constructBuildPathFromSlots(
     }
 
     const result = await client.execute({
-      sql: `SELECT item_id, SUM(wins) as wins, SUM(matches) as matches
+      sql: `SELECT
+              item_id,
+              SUM(wins) as wins,
+              SUM(matches) as matches,
+              CAST(SUM(matches) AS REAL) / SUM(SUM(matches)) OVER () * 100 as pick_rate
             FROM champion_item_slots
             WHERE champion_id = ? AND team_position = ? AND build_slot = ?${excludeClause}
             GROUP BY item_id
@@ -123,6 +129,7 @@ async function constructBuildPathFromSlots(
       .map((r) => ({
         itemId: r.item_id as number,
         winRate: ((r.wins as number) / (r.matches as number)) * 100,
+        pickRate: r.pick_rate as number,
         games: r.matches as number,
       }));
   };

@@ -190,12 +190,25 @@ wails build              # Build production binary
 ## Data Pipeline
 See `data-analyzer/CLAUDE.md` for the match collection and aggregation pipeline.
 
+### Key Concepts
+- **Statistical Sampling**: Timeline fetched for ~20% of matches (build order data), match details for 100% (win rates)
+- **Versioned Data**: Patch versions include build numbers (e.g., 15.24.1, 15.24.2) for incremental updates
+- **Upsert Pattern**: New data accumulates into existing patch buckets via `ON CONFLICT DO UPDATE`
+
+### Data Sources by Table
+| Table | Sample Rate | Data Source |
+|-------|-------------|-------------|
+| `champion_stats` | 100% | Match details |
+| `champion_items` | 100% | Final inventory (item0-5) |
+| `champion_item_slots` | ~20% | Timeline build order |
+| `champion_matchups` | 100% | Match details |
+
 ### Exporting Stats Data
 ```bash
 cd data-analyzer
-go run cmd/reducer/main.go --output-dir=./export --base-url=https://your-cdn.example.com/data --no-db
+go run cmd/reducer/main.go --output-dir=./export
 ```
 
 This generates:
-- `export/manifest.json` - Version info and data URL
+- `export/manifest.json` - Version info (e.g., "15.24.3") and data URL
 - `export/data.json` - All aggregated stats

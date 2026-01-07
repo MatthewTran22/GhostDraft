@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -14,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	json "github.com/goccy/go-json"
 )
 
 //go:embed templates/*
@@ -29,6 +30,7 @@ var (
 type PageData struct {
 	RiotAPIKey  string
 	StoragePath string
+	TursoURL    string
 }
 
 func main() {
@@ -56,6 +58,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
 		RiotAPIKey:  maskKey(os.Getenv("RIOT_API_KEY")),
 		StoragePath: os.Getenv("BLOB_STORAGE_PATH"),
+		TursoURL:    maskTursoURL(os.Getenv("TURSO_DATABASE_URL")),
 	}
 
 	tmpl.Execute(w, data)
@@ -66,6 +69,20 @@ func maskKey(key string) string {
 		return "Not set"
 	}
 	return key[:10] + "..." + key[len(key)-4:]
+}
+
+func maskTursoURL(url string) string {
+	if url == "" {
+		return "Not set"
+	}
+	// Show just the database name from libsql://db-name.turso.io
+	if strings.HasPrefix(url, "libsql://") {
+		parts := strings.Split(url[9:], ".")
+		if len(parts) > 0 {
+			return parts[0] + ".turso.io"
+		}
+	}
+	return "Configured"
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -164,9 +181,7 @@ func runPipeline(riotID, matchCount, maxPlayers string, reduceOnly bool) {
 	broadcast("SUCCESS!")
 	broadcast("========================================")
 	broadcast("Output: ./export/data.json")
-	broadcast("\nNext steps:")
-	broadcast("  1. Upload data.json to GitHub")
-	broadcast("  2. Update manifest.json version")
+	broadcast("Turso: Data pushed to cloud database")
 }
 
 func runCommandWithOutput(dir, name string, args ...string) error {

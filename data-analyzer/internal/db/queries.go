@@ -2,7 +2,8 @@ package db
 
 import (
 	"context"
-	"encoding/json"
+
+	json "github.com/goccy/go-json"
 )
 
 // Match represents a match record

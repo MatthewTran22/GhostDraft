@@ -79,39 +79,44 @@ TURSO_AUTH_TOKEN=your-token
    ├── Create file rotator (writes to hot/)
    └── Resolve starting player (--riot-id → PUUID)
 
-2. SPIDER LOOP (while queue not empty AND activePlayerCount < max)
-   ├── Pop player from queue
-   ├── Fetch 20 most recent ranked match IDs (1 API call)
+2. SPIDER LOOP (worker pool with producer-consumer pattern)
+   ├── Producer: Pop player from queue, fetch match history
+   ├── Dispatch match IDs to worker pool (default 10 workers)
    │
-   └── For each match (newest first):
+   └── Workers process each match:
        ├── Skip if already visited (bloom filter)
-       ├── Fetch match details (1 API call)
-       ├── If old patch → BREAK early (skip remaining matches)
-       ├── Fetch timeline (1 API call)
+       ├── Fetch match details (1 API call) - ALWAYS
+       ├── If old patch → skip (don't collect players)
+       ├── Statistical sampling: fetch timeline for ~20% of matches
        ├── Write 10 participants to JSONL
-       └── Buffer co-players
-
-   └── After matches:
-       ├── ALWAYS add co-players to queue (they might be active)
-       └── If ≥50% current patch → count as active player
-           If <50% current patch → don't count (stale player)
+       └── Queue new players from current patch matches
 
 3. FILE ROTATION → hot/*.jsonl → warm/*.jsonl (at 1000 matches)
 
 4. SHUTDOWN → Flush to warm/
 ```
 
-### Key Optimizations
-- **Early break**: Once we hit an old patch match, skip remaining (they're older)
-- **Stale player handling**: Players with <50% current patch matches don't count towards max-players limit, but their co-players are still queued (they might be active)
-- **API efficiency**: 1 + (2 × current patch games) API calls per player
+### Statistical Sampling Strategy
+To reproduce U.GG-style build order stats without fetching expensive timeline for every match:
+- **Match Details**: Fetched for 100% of games (accurate win rates)
+- **Match Timeline**: Fetched for ~20% of games (build order data)
+- **Configurable**: `TimelineSamplingRate` in SpiderConfig (0.0-1.0, default 0.20)
 
-### API Calls Per Player
-| Scenario | API Calls |
-|----------|-----------|
-| 20 current patch games | 1 + 40 = 41 |
-| 10 current patch games | 1 + 21 = 22 |
-| 3 current patch games | 1 + 7 = 8 |
+This reduces API calls by ~40% while maintaining statistically representative build path data.
+
+### Key Optimizations
+- **Worker pool**: 10 concurrent workers (configurable) for parallel match fetching
+- **Bloom filters**: Memory-efficient deduplication of matches and players
+- **Timeline sampling**: Only fetch heavy timeline endpoint for 20% of matches
+- **Early break**: Once we hit an old patch match, skip remaining (they're older)
+- **goccy/go-json**: Fast JSON parsing (~2x faster than encoding/json)
+
+### API Calls Per Player (with 20% timeline sampling)
+| Scenario | Old (100% timeline) | New (20% sampling) |
+|----------|---------------------|-------------------|
+| 20 current patch games | 1 + 40 = 41 | 1 + 24 = 25 |
+| 10 current patch games | 1 + 20 = 21 | 1 + 12 = 13 |
+| 5 current patch games | 1 + 10 = 11 | 1 + 6 = 7 |
 
 ## Reducer Workflow
 
@@ -125,41 +130,48 @@ TURSO_AUTH_TOKEN=your-token
    └── Scan warm/*.jsonl files
 
 2. AGGREGATE (per file)
-   ├── Parse JSONL records
+   ├── Parse JSONL records (using goccy/go-json)
    ├── Normalize patch (15.24.734 → 15.24)
-   ├── Aggregate champion stats, items, item slots
+   ├── Champion stats: ALL matches (100%)
+   ├── Item stats: ALL matches using item0-5 (100%)
+   ├── Item slot stats: ONLY matches with buildOrder (~20%)
    └── Calculate matchups (group by matchId, find lane opponents)
 
 3. EXPORT JSON
    ├── Write data.json (all stats)
-   └── Write manifest.json (version, min_patch)
+   └── Write manifest.json (version with build number, e.g., 15.24.3)
 
-4. PUSH TO TURSO
-   ├── Create tables + indexes
-   ├── Clear existing data (1 transaction)
-   ├── Set data version
-   ├── Insert all tables (multi-value INSERTs, 100 rows/statement)
-   └── Delete old patches (1 transaction, WHERE patch < min_patch)
+4. PUSH TO TURSO (bulk load optimized)
+   ├── Create tables (without indexes)
+   ├── Drop existing indexes
+   ├── Calculate next version (15.24.2 → 15.24.3, or 15.25.1 for new patch)
+   ├── Upsert all tables (ON CONFLICT DO UPDATE, 500 rows/batch)
+   ├── Recreate indexes
+   └── Delete old patches (WHERE patch < min_patch)
 
 5. ARCHIVE → warm/*.jsonl → cold/*.jsonl.gz
 ```
 
 ### Reducer Features
 - **Patch normalization**: `14.24.448` → `14.24`
-- **Build order tracking**: Uses `buildOrder` field to track item purchase order (slots 1-6)
+- **Sampling-aware aggregation**:
+  - Item stats (champion_items): Uses `item0-5` from ALL matches (100% sample)
+  - Item slot stats (champion_item_slots): Uses `buildOrder` from sampled matches (~20%)
+- **Versioned upserts**: Data accumulates with build numbers (15.24.1, 15.24.2, 15.24.3)
 - **Item deduplication**: Only counts unique items per player
 - **Completed items only**: Filters out components using Data Dragon (items with no "into" field, cost >= 1000g)
 - **Matchup calculation**: Groups participants by matchId to find lane opponents
-- **JSON Export**: Aggregates ALL files together and exports to data.json + manifest.json
 - **Old patch cleanup**: Deletes data older than current patch - 3 (e.g., if 15.24, deletes 15.21 and older)
 - **Archiving**: Compresses processed files to cold/ with gzip
 
-### Turso Batching
-- **Multi-value INSERT**: 100 rows per SQL statement (not 100 separate INSERTs)
+### Turso Bulk Loading
+- **Drop indexes before insert**: Faster bulk inserts without index maintenance
+- **Multi-value INSERT**: 500 rows per SQL statement
+- **Upsert pattern**: `ON CONFLICT DO UPDATE SET wins = wins + excluded.wins`
+- **Recreate indexes after insert**: Indexes built once on final data
 - **Single transaction per table**: All inserts for a table in one transaction
-- **Batched deletes**: All 4 table deletes in one transaction
 
-For 40k rows: ~400 SQL statements instead of ~40,000.
+For 40k rows: ~80 SQL statements instead of ~40,000.
 
 ## Storage Lifecycle
 - **hot/** - Active writes (current JSONL file being written)
@@ -263,9 +275,12 @@ The `min_patch` field tells clients to delete data older than this patch.
   "teamPosition": "MIDDLE",
   "win": true,
   "item0": 3089, "item1": 3157, "item2": 3020, "item3": 3165, "item4": 3135, "item5": 3907,
-  "buildOrder": [3089, 3157, 3165, 3135, 3907]
+  "buildOrder": [3089, 3157, 3165, 3135, 3907]  // Optional: only present for ~20% of matches (sampled)
 }
 ```
+
+**Note**: `buildOrder` is only populated when timeline was fetched (statistical sampling).
+When empty/missing, reducer uses `item0-5` for item stats but skips item slot stats.
 
 ## Riot API Endpoints Used
 
@@ -287,14 +302,18 @@ data-analyzer/
 │   ├── collector/       # Spider crawler CLI
 │   ├── reducer/         # JSONL → JSON/Turso aggregator
 │   ├── pipeline/        # Combined collector + reducer
-│   └── server/          # Web UI server (optional)
+│   ├── server/          # Web UI server (optional)
+│   └── ui/              # Web UI for pipeline control
 ├── internal/
+│   ├── collector/       # Spider with worker pool
+│   │   └── spider.go    # Producer-consumer pattern, bloom filters, timeline sampling
 │   ├── riot/            # Riot API client + Data Dragon
 │   │   ├── client.go    # HTTP client with rate limiting
 │   │   └── types.go     # API response structs
 │   ├── storage/         # JSONL file rotation
-│   │   └── rotator.go   # FileRotator implementation
+│   │   ├── rotator.go   # FileRotator implementation
+│   │   └── types.go     # RawMatch struct
 │   └── db/
-│       └── turso.go     # Turso client with batched operations
+│       └── turso.go     # Turso client with bulk loading, upserts
 └── export/              # Output directory (gitignored)
 ```

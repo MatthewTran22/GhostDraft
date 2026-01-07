@@ -3,7 +3,7 @@ package storage
 import (
 	"bufio"
 	"compress/gzip"
-	"encoding/json"
+	json "github.com/goccy/go-json"
 	"fmt"
 	"io"
 	"os"
