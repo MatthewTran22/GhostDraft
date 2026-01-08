@@ -304,6 +304,8 @@ data-analyzer/
 │   ├── pipeline/        # Combined collector + reducer
 │   ├── server/          # Web UI server (optional)
 │   └── ui/              # Web UI for pipeline control
+│       ├── main.go      # HTTP server with SSE streaming
+│       └── templates/   # HTML templates
 ├── internal/
 │   ├── collector/       # Spider with worker pool
 │   │   └── spider.go    # Producer-consumer pattern, bloom filters, timeline sampling
@@ -315,5 +317,45 @@ data-analyzer/
 │   │   └── types.go     # RawMatch struct
 │   └── db/
 │       └── turso.go     # Turso client with bulk loading, upserts
+├── Dockerfile           # Multi-stage build for pipeline
+├── docker-compose.yml   # Single service (pipeline + Turso)
 └── export/              # Output directory (gitignored)
 ```
+
+## Docker
+
+### docker-compose.yml
+```yaml
+services:
+  pipeline:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - RIOT_API_KEY=${RIOT_API_KEY}
+      - BLOB_STORAGE_PATH=/app/data
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
+    volumes:
+      - ./data:/app/data
+      - ./export:/app/export
+```
+
+### Running with Docker
+```bash
+# Build and start
+docker-compose up --build
+
+# Access Web UI at http://localhost:8080
+```
+
+## Web UI
+
+The pipeline includes a web UI (`cmd/ui/`) for controlling collection and viewing output.
+
+### Features
+- **Environment display**: Shows Riot API Key, Storage path, and Turso database status
+- **Pipeline settings**: Configure Riot ID, matches per player, max players
+- **Reduce-only mode**: Skip collection, just run reducer on existing data
+- **Live output streaming**: SSE-based real-time log output
+- **Auto-push to Turso**: Reducer automatically pushes to Turso when complete

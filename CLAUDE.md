@@ -147,6 +147,11 @@ EventsOn('fullcomp:update', updateFullComp);
 - Falls back to aggregated data across patches if current patch has no data
 - Counter matchups filter: WR < 49% (true counters only)
 - Counter picks filter: WR > 51% (champions that beat the enemy)
+- Uses window functions for pick rate calculation from sampled data:
+  ```sql
+  CAST(SUM(matches) AS REAL) / SUM(SUM(matches)) OVER () * 100 as pick_rate
+  ```
+  This avoids the "denominator trap" when calculating percentages from sampled data.
 
 ### Item Filtering
 - Only shows "completed" items (not components)
