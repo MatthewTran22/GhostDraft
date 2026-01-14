@@ -5,9 +5,11 @@ import { EventsOn } from '../wailsjs/runtime/runtime';
 // Initial HTML structure
 document.querySelector('#app').innerHTML = `
     <div class="gold-box hidden" id="gold-box">
-        <span class="gold-team" id="gold-my-team">0g</span>
-        <span class="gold-vs">vs</span>
-        <span class="gold-team enemy" id="gold-enemy-team">0g</span>
+        <div class="gold-teams-row">
+            <span class="gold-team" id="gold-my-team">0g</span>
+            <span class="gold-vs">vs</span>
+            <span class="gold-team enemy" id="gold-enemy-team">0g</span>
+        </div>
         <span class="gold-diff" id="gold-diff"></span>
     </div>
     <div class="build-box hidden" id="build-box">
@@ -962,7 +964,7 @@ function updateGoldBox(data) {
     const sign = diff > 0 ? '+' : '';
     const diffClass = diff > 0 ? 'ahead' : diff < 0 ? 'behind' : 'even';
 
-    goldDiff.textContent = `(${sign}${formatGold(Math.abs(diff))})`;
+    goldDiff.textContent = `${sign}${formatGold(Math.abs(diff))}`;
     goldDiff.className = `gold-diff ${diffClass}`;
 }
 

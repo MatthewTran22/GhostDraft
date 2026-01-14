@@ -2709,19 +2709,27 @@ body {
     left: 50%;
     transform: translateX(-50%);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 6px;
     padding: 12px 24px;
     background: linear-gradient(135deg, rgba(10, 14, 23, 0.98) 0%, rgba(5, 8, 16, 0.98) 100%);
     border: 2px solid var(--hextech-gold);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 20px rgba(201, 162, 39, 0.4);
     z-index: 9999;
+    pointer-events: none; /* Click-through - don't capture mouse input */
 }
 
 .gold-box.hidden {
     display: none !important;
+}
+
+.gold-teams-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .gold-team {
@@ -2748,21 +2756,21 @@ body {
 }
 
 .gold-diff {
-    font-family: 'Rajdhani', sans-serif;
-    font-size: 14px;
+    font-family: 'Cinzel', serif;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text-muted);
-    margin-left: 4px;
+    text-align: center;
 }
 
 .gold-diff.ahead {
     color: var(--status-win);
-    text-shadow: 0 0 8px var(--status-win-glow);
+    text-shadow: 0 0 10px var(--status-win-glow);
 }
 
 .gold-diff.behind {
     color: var(--status-lose);
-    text-shadow: 0 0 8px var(--status-lose-glow);
+    text-shadow: 0 0 10px var(--status-lose-glow);
 }
 
 .gold-diff.even {
@@ -2785,6 +2793,7 @@ body {
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 20px rgba(201, 162, 39, 0.4);
     z-index: 9999;
     min-width: 240px;
+    pointer-events: none; /* Click-through - don't capture mouse input */
 }
 
 .build-box.hidden {

@@ -15,6 +15,10 @@ var (
 	procCallNextHookEx      = user32.NewProc("CallNextHookEx")
 	procGetMessage          = user32.NewProc("GetMessageW")
 	procGetAsyncKeyState    = user32.NewProc("GetAsyncKeyState")
+	procGetForegroundWindow = user32.NewProc("GetForegroundWindow")
+	procGetWindowLongW      = user32.NewProc("GetWindowLongW")
+	procSetWindowLongW      = user32.NewProc("SetWindowLongW")
+	procFindWindowW         = user32.NewProc("FindWindowW")
 )
 
 const (
@@ -24,6 +28,10 @@ const (
 	VK_O           = 0x4F
 	VK_CONTROL     = 0x11
 	VK_TAB         = 0x09
+
+	// Window style constants for click-through
+	WS_EX_TRANSPARENT = 0x00000020
+	WS_EX_LAYERED     = 0x00080000
 )
 
 // KBDLLHOOKSTRUCT contains information about a low-level keyboard input event
@@ -59,6 +67,36 @@ var savedWindowX, savedWindowY, savedWindowW, savedWindowH int
 func isKeyPressed(vk uintptr) bool {
 	ret, _, _ := procGetAsyncKeyState.Call(vk)
 	return ret&0x8000 != 0
+}
+
+// findGhostDraftWindow finds the GhostDraft window handle
+func findGhostDraftWindow() uintptr {
+	title, _ := syscall.UTF16PtrFromString("GhostDraft")
+	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(title)))
+	return hwnd
+}
+
+// setWindowClickThrough makes a window click-through (mouse events pass through)
+func setWindowClickThrough(hwnd uintptr, clickThrough bool) {
+	if hwnd == 0 {
+		return
+	}
+
+	// GWL_EXSTYLE is -20, need to convert to uintptr properly
+	gwlExStyle := uintptr(0xFFFFFFEC) // -20 as unsigned
+
+	// Get current extended style
+	exStyle, _, _ := procGetWindowLongW.Call(hwnd, gwlExStyle)
+
+	if clickThrough {
+		// Add WS_EX_TRANSPARENT and WS_EX_LAYERED to make click-through
+		newStyle := exStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED
+		procSetWindowLongW.Call(hwnd, gwlExStyle, newStyle)
+	} else {
+		// Remove WS_EX_TRANSPARENT to restore normal behavior
+		newStyle := exStyle &^ WS_EX_TRANSPARENT
+		procSetWindowLongW.Call(hwnd, gwlExStyle, newStyle)
+	}
 }
 
 // keyboardProc is the low-level keyboard hook callback
@@ -197,6 +235,12 @@ func (a *App) onTabPressed() {
 
 	a.showWindow()
 
+	// Make window click-through so it doesn't capture mouse input
+	// Small delay to ensure window is shown before modifying style
+	time.Sleep(20 * time.Millisecond)
+	hwnd := findGhostDraftWindow()
+	setWindowClickThrough(hwnd, true)
+
 	// Start polling gold data
 	if stopGoldPoll != nil {
 		close(stopGoldPoll)
@@ -235,6 +279,10 @@ func (a *App) onTabReleased() {
 
 		// Tell frontend to hide gold box mode
 		wailsRuntime.EventsEmit(a.ctx, "goldbox:show", false)
+
+		// Restore mouse events (no longer click-through)
+		hwnd := findGhostDraftWindow()
+		setWindowClickThrough(hwnd, false)
 
 		// Hide window
 		a.hideWindow()
