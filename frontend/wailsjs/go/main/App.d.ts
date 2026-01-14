@@ -19,6 +19,10 @@ export function GetMetaChampions():Promise<main.MetaData>;
 
 export function GetPersonalStats():Promise<lcu.PersonalStats>;
 
+export function HideForGame():Promise<void>;
+
 export function RegisterToggleHotkey():Promise<void>;
+
+export function ShowAfterGame():Promise<void>;
 
 export function ToggleWindow():Promise<void>;

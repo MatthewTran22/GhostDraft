@@ -3,7 +3,8 @@
     "allow": [
       "Bash(go build:*)",
       "Bash(cat:*)",
-      "Skill(frontend-design)"
+      "Skill(frontend-design)",
+      "Bash(npm run build:*)"
     ]
   }
 }

@@ -1,9 +1,17 @@
 import './style.css';
-import { GetConnectionStatus, GetMetaChampions, GetPersonalStats, GetChampionDetails, GetChampionBuild, GetGameflowPhase, GetGoldDiff } from '../wailsjs/go/main/App';
+import { GetConnectionStatus, GetMetaChampions, GetPersonalStats, GetChampionDetails, GetChampionBuild, GetGameflowPhase } from '../wailsjs/go/main/App';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
 // Initial HTML structure
 document.querySelector('#app').innerHTML = `
+    <div class="gold-box hidden" id="gold-box">
+        <span class="gold-box-value" id="gold-box-value">+0g</span>
+    </div>
+    <div class="build-box hidden" id="build-box">
+        <div class="build-box-content" id="build-box-content">
+            <div class="build-box-loading">Waiting for build...</div>
+        </div>
+    </div>
     <div class="overlay-box" id="overlay-box">
         <div class="header drag-region">
             <h1>GhostDraft</h1>
@@ -27,7 +35,6 @@ document.querySelector('#app').innerHTML = `
             <div class="ingame-tabs">
                 <button class="ingame-tab-btn active" data-ingame-tab="build">Build</button>
                 <button class="ingame-tab-btn" data-ingame-tab="scouting">Scouting</button>
-                <button class="ingame-tab-btn" data-ingame-tab="gold">Gold</button>
             </div>
             <div class="ingame-tab-content active" id="ingame-tab-build">
                 <div class="ingame-build" id="ingame-build">
@@ -37,11 +44,6 @@ document.querySelector('#app').innerHTML = `
             <div class="ingame-tab-content" id="ingame-tab-scouting">
                 <div class="scouting-content" id="scouting-content">
                     <div class="scouting-loading">Scouting players...</div>
-                </div>
-            </div>
-            <div class="ingame-tab-content" id="ingame-tab-gold">
-                <div class="gold-content" id="gold-content">
-                    <div class="gold-info">Hold TAB in-game to view gold differences</div>
                 </div>
             </div>
         </div>
@@ -121,7 +123,14 @@ document.querySelector('#app').innerHTML = `
     </div>
 `;
 
-// DOM elements
+// DOM elements - Tab HUD boxes (positioned independently)
+const goldBox = document.getElementById('gold-box');
+const buildBox = document.getElementById('build-box');
+const goldBoxValue = document.getElementById('gold-box-value');
+const buildBoxContent = document.getElementById('build-box-content');
+
+// DOM elements - Main overlay
+const overlayBox = document.getElementById('overlay-box');
 const statusDot = document.getElementById('status-dot');
 const statusMessage = document.getElementById('status-message');
 const statusCard = document.getElementById('status-card');
@@ -132,7 +141,6 @@ const ingameChampName = document.getElementById('ingame-champ-name');
 const ingameChampRole = document.getElementById('ingame-champ-role');
 const ingameBuild = document.getElementById('ingame-build');
 const scoutingContent = document.getElementById('scouting-content');
-const goldContent = document.getElementById('gold-content');
 const teamcompCard = document.getElementById('teamcomp-card');
 const teamcompWarning = document.getElementById('teamcomp-warning');
 const bansCard = document.getElementById('bans-card');
@@ -187,11 +195,6 @@ document.querySelectorAll('.ingame-tab-btn').forEach(btn => {
         // Update active content
         document.querySelectorAll('.ingame-tab-content').forEach(c => c.classList.remove('active'));
         document.getElementById(`ingame-tab-${btn.dataset.ingameTab}`).classList.add('active');
-
-        // Load gold data when Gold tab is clicked
-        if (btn.dataset.ingameTab === 'gold') {
-            loadGoldData();
-        }
     });
 });
 
@@ -205,6 +208,7 @@ let isInGame = false;
 let statsLoaded = false;
 let statsRetryCount = 0;
 let selectedChampion = null; // { championId, role }
+let isGoldBoxMode = false;
 
 // Tabs that are only visible during champ select
 const champSelectOnlyTabs = ['matchup', 'build', 'teamcomp'];
@@ -666,12 +670,125 @@ function updateGameflow(data) {
 
         // Show tabs container
         tabsContainer.classList.remove('hidden');
+
+        // After a game, we're definitely not in champ select anymore
+        // Ensure champ-select-only tabs are hidden and switch to Stats
+        if (isInChampSelect) {
+            isInChampSelect = false;
+            updateTabVisibility(false);
+            const statsBtn = document.querySelector('.tab-btn[data-tab="stats"]');
+            if (statsBtn) {
+                statsBtn.click();
+            }
+        }
     }
+}
+
+// Shared function to render build-box content (Tab HUD)
+function renderBuildBoxContent(championName, build) {
+    let html = '';
+
+    // Champion name header
+    html += `<div class="build-box-header">${championName || 'Unknown'}</div>`;
+
+    // Core items
+    html += `
+        <div class="build-box-section">
+            <div class="build-box-label">Core Items</div>
+            <div class="build-box-items">
+                ${renderBuildBoxItems(build.coreItems)}
+            </div>
+        </div>
+    `;
+
+    // 4th item options
+    if (build.fourthItems && build.fourthItems.length > 0) {
+        html += `
+            <div class="build-box-section">
+                <div class="build-box-label">4th Item</div>
+                <div class="build-box-items">
+                    ${renderBuildBoxItemsWithWR(build.fourthItems)}
+                </div>
+            </div>
+        `;
+    }
+
+    // 5th item options
+    if (build.fifthItems && build.fifthItems.length > 0) {
+        html += `
+            <div class="build-box-section">
+                <div class="build-box-label">5th Item</div>
+                <div class="build-box-items">
+                    ${renderBuildBoxItemsWithWR(build.fifthItems)}
+                </div>
+            </div>
+        `;
+    }
+
+    // 6th item options
+    if (build.sixthItems && build.sixthItems.length > 0) {
+        html += `
+            <div class="build-box-section">
+                <div class="build-box-label">6th Item</div>
+                <div class="build-box-items">
+                    ${renderBuildBoxItemsWithWR(build.sixthItems)}
+                </div>
+            </div>
+        `;
+    }
+
+    return html;
+}
+
+// Render basic items for build-box
+function renderBuildBoxItems(items) {
+    if (!items || items.length === 0) return '<span class="build-box-empty">-</span>';
+    return items.map(item => `
+        <div class="build-box-item">
+            <img class="build-box-item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name}" />
+        </div>
+    `).join('');
+}
+
+// Render items with win rate for build-box
+function renderBuildBoxItemsWithWR(items) {
+    if (!items || items.length === 0) return '<span class="build-box-empty">-</span>';
+    return items.slice(0, 4).map(item => {
+        const wr = item.winRate ? item.winRate.toFixed(1) : '?';
+        const wrClass = item.winRate >= 51 ? 'winning' : item.winRate <= 49 ? 'losing' : 'even';
+        return `
+            <div class="build-box-item-wr">
+                <img class="build-box-item-icon" src="${item.iconURL}" alt="${item.name}" title="${item.name}" />
+                <span class="build-box-wr ${wrClass}">${wr}%</span>
+            </div>
+        `;
+    }).join('');
+}
+
+// Update build box from items:update event (champ select)
+function updateBuildBoxFromItems(data) {
+    if (!data || !data.hasItems || !data.builds || data.builds.length === 0) {
+        return;
+    }
+    buildBoxContent.innerHTML = renderBuildBoxContent(data.championName, data.builds[0]);
+}
+
+// Update build box from ingame:build event (in-game)
+function updateBuildBoxFromInGame(data) {
+    if (!data || !data.hasBuild || !data.builds || data.builds.length === 0) {
+        return;
+    }
+    buildBoxContent.innerHTML = renderBuildBoxContent(data.championName, data.builds[0]);
 }
 
 // Update in-game build
 function updateInGameBuild(data) {
     console.log('In-game build data:', data);
+
+    // Also update the build-box for Tab HUD (uses hasBuild not hasItems)
+    if (data && data.hasBuild && data.builds && data.builds.length > 0) {
+        updateBuildBoxFromInGame(data);
+    }
 
     if (!data.hasBuild) {
         ingameChampName.textContent = data.championName || 'Unknown';
@@ -694,55 +811,26 @@ function updateInGameBuild(data) {
     }
 
     const build = data.builds[0];
-    let html = '';
 
-    // Core items
-    html += `
-        <div class="ingame-items-section">
-            <div class="ingame-items-header">Core Build</div>
-            <div class="ingame-items-row">
-                ${renderInGameItems(build.coreItems)}
-            </div>
+    // Use same format as champ select Build tab
+    ingameBuild.innerHTML = `
+        <div class="items-section">
+            <div class="items-header">Core Items</div>
+            <div class="items-grid">${renderBasicItems(build.coreItems)}</div>
+        </div>
+        <div class="items-section">
+            <div class="items-header">4th Item Options</div>
+            <div class="items-grid">${renderItemsWithWR(build.fourthItems)}</div>
+        </div>
+        <div class="items-section">
+            <div class="items-header">5th Item Options</div>
+            <div class="items-grid">${renderItemsWithWR(build.fifthItems)}</div>
+        </div>
+        <div class="items-section">
+            <div class="items-header">6th Item Options</div>
+            <div class="items-grid">${renderItemsWithWR(build.sixthItems)}</div>
         </div>
     `;
-
-    // 4th item options
-    if (build.fourthItems && build.fourthItems.length > 0) {
-        html += `
-            <div class="ingame-items-section">
-                <div class="ingame-items-header">4th Item</div>
-                <div class="ingame-items-row">
-                    ${renderInGameItemsWithWR(build.fourthItems)}
-                </div>
-            </div>
-        `;
-    }
-
-    // 5th item options
-    if (build.fifthItems && build.fifthItems.length > 0) {
-        html += `
-            <div class="ingame-items-section">
-                <div class="ingame-items-header">5th Item</div>
-                <div class="ingame-items-row">
-                    ${renderInGameItemsWithWR(build.fifthItems)}
-                </div>
-            </div>
-        `;
-    }
-
-    // 6th item options (always show)
-    html += `
-        <div class="ingame-items-section">
-            <div class="ingame-items-header">6th Item</div>
-            <div class="ingame-items-row">
-                ${build.sixthItems && build.sixthItems.length > 0
-                    ? renderInGameItemsWithWR(build.sixthItems)
-                    : '<span class="ingame-no-items">No data</span>'}
-            </div>
-        </div>
-    `;
-
-    ingameBuild.innerHTML = html;
 }
 
 // Render items for in-game view
@@ -840,91 +928,35 @@ function renderPlayerCard(player) {
     `;
 }
 
-// Load gold data
-function loadGoldData() {
-    goldContent.innerHTML = '<div class="gold-loading">Loading gold data...</div>';
-
-    GetGoldDiff()
-        .then(data => {
-            updateGoldDisplay(data);
-        })
-        .catch(err => {
-            console.error('Failed to load gold data:', err);
-            goldContent.innerHTML = '<div class="gold-error">Failed to load gold data</div>';
-        });
-}
-
-// Update gold display
-function updateGoldDisplay(data) {
+// Update gold box display
+function updateGoldBox(data) {
     if (!data.hasData) {
-        goldContent.innerHTML = `<div class="gold-error">${data.error || 'No gold data available'}</div>`;
+        goldBoxValue.textContent = '---';
+        goldBoxValue.className = 'gold-box-value';
         return;
     }
 
-    const goldDiff = data.goldDiff;
-    const diffClass = goldDiff > 0 ? 'positive' : goldDiff < 0 ? 'negative' : 'even';
-    const diffSign = goldDiff > 0 ? '+' : '';
+    const diff = data.goldDiff;
+    const sign = diff > 0 ? '+' : '';
+    const diffClass = diff > 0 ? 'ahead' : diff < 0 ? 'behind' : 'even';
 
-    let html = `
-        <div class="gold-summary">
-            <div class="gold-total-diff ${diffClass}">
-                <span class="gold-diff-value">${diffSign}${goldDiff.toLocaleString()}g</span>
-                <span class="gold-diff-label">Team Gold Diff</span>
-            </div>
-            <div class="gold-team-totals">
-                <span class="gold-team my-team">${data.myTeamGold.toLocaleString()}g</span>
-                <span class="gold-vs">vs</span>
-                <span class="gold-team enemy-team">${data.enemyTeamGold.toLocaleString()}g</span>
-            </div>
-            <button class="gold-refresh-btn" onclick="loadGoldData()">Refresh</button>
-        </div>
-    `;
+    goldBoxValue.textContent = `${sign}${diff.toLocaleString()}g`;
+    goldBoxValue.className = `gold-box-value ${diffClass}`;
+}
 
-    // Matchups by position
-    if (data.matchups && data.matchups.length > 0) {
-        html += '<div class="gold-matchups">';
-        for (const matchup of data.matchups) {
-            const diff = matchup.goldDiff;
-            const matchDiffClass = diff > 0 ? 'positive' : diff < 0 ? 'negative' : 'even';
-            const matchDiffSign = diff > 0 ? '+' : '';
-
-            html += `
-                <div class="gold-matchup-row">
-                    <div class="gold-matchup-player my-side">
-                        <img class="gold-champ-icon" src="${matchup.myPlayer.championIcon}" alt="${matchup.myPlayer.championName}" />
-                        <span class="gold-player-gold">${matchup.myPlayer.itemGold.toLocaleString()}g</span>
-                    </div>
-                    <div class="gold-matchup-info">
-                        <span class="gold-position">${formatPosition(matchup.position)}</span>
-                        <span class="gold-matchup-diff ${matchDiffClass}">${matchDiffSign}${diff.toLocaleString()}g</span>
-                    </div>
-                    <div class="gold-matchup-player enemy-side">
-                        <span class="gold-player-gold">${matchup.enemyPlayer.itemGold.toLocaleString()}g</span>
-                        <img class="gold-champ-icon" src="${matchup.enemyPlayer.championIcon}" alt="${matchup.enemyPlayer.championName}" />
-                    </div>
-                </div>
-            `;
-        }
-        html += '</div>';
+// Toggle tab HUD mode
+function onGoldBoxShow(active) {
+    isGoldBoxMode = active;
+    if (active) {
+        goldBox.classList.remove('hidden');
+        buildBox.classList.remove('hidden');
+        overlayBox.classList.add('hidden');
+    } else {
+        goldBox.classList.add('hidden');
+        buildBox.classList.add('hidden');
+        overlayBox.classList.remove('hidden');
     }
-
-    goldContent.innerHTML = html;
 }
-
-// Format position name
-function formatPosition(pos) {
-    const posMap = {
-        'TOP': 'Top',
-        'JUNGLE': 'Jng',
-        'MIDDLE': 'Mid',
-        'BOTTOM': 'ADC',
-        'UTILITY': 'Sup'
-    };
-    return posMap[pos] || pos;
-}
-
-// Make loadGoldData available globally for refresh button
-window.loadGoldData = loadGoldData;
 
 // Update champ select state
 function updateChampSelect(data) {
@@ -1113,15 +1145,23 @@ function renderBuildsToContainer(subtabsEl, contentEl, builds) {
 
 // Update item build with multiple build paths (Build tab during champ select)
 function updateItems(data) {
+    console.log('updateItems called with:', data);
+
     if (!data || !data.hasItems || !data.builds || data.builds.length === 0) {
         buildSubtabs.innerHTML = '';
         buildContent.innerHTML = '<div class="items-empty">Select a champion...</div>';
         currentBuildsData = null;
+        console.log('No items data, returning early');
+        // Don't clear build-box - keep the last build for in-game Tab HUD
         return;
     }
 
+    console.log('Updating build-box with items data');
     currentBuildsData = data.builds;
     renderBuildsToContainer(buildSubtabs, buildContent, data.builds);
+
+    // Also update the build-box for Tab HUD
+    updateBuildBoxFromItems(data);
 }
 
 // Update counter picks (shown after ban phase)
@@ -1166,6 +1206,8 @@ EventsOn('counterpicks:update', updateCounterPicks);
 EventsOn('gameflow:update', updateGameflow);
 EventsOn('ingame:build', updateInGameBuild);
 EventsOn('ingame:scouting', updateScouting);
+EventsOn('gold:update', updateGoldBox);
+EventsOn('goldbox:show', onGoldBoxShow);
 
 // Get initial status
 GetConnectionStatus()

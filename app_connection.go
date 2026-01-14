@@ -100,6 +100,12 @@ func (a *App) tryConnect() {
 		"port":      a.lcuClient.GetPort(),
 	})
 
+	// Store current user's PUUID for in-game identification
+	if puuid, err := a.lcuClient.GetCurrentSummonerPUUID(); err == nil {
+		a.currentPUUID = puuid
+		fmt.Printf("Stored user PUUID: %s\n", puuid[:8])
+	}
+
 	fmt.Printf("League Connected! Port: %s\n", a.lcuClient.GetPort())
 }
 

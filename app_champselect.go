@@ -126,6 +126,14 @@ func (a *App) onChampSelectUpdate(session *lcu.ChampSelectSession, inChampSelect
 		isLocked = true
 	}
 
+	// Save locked champion data for in-game use
+	if isLocked && localPosition != "" {
+		a.lockedChampionID = championID
+		a.lockedChampionName = championName
+		a.lockedPosition = localPosition
+		fmt.Printf("Saved locked champion: %s (%d) %s\n", championName, championID, localPosition)
+	}
+
 	fmt.Printf("Final: championID=%d, championName=%s, lastFetched=%d\n", championID, championName, a.lastFetchedChamp)
 
 	// Check if all bans are completed (we're in pick phase)
@@ -227,31 +235,90 @@ func (a *App) onGameflowUpdate(phase string) {
 		"phase": phase,
 	})
 
-	// When entering a game, fetch and emit build data and scouting
+	// When entering a game, hide overlay and fetch data
 	if phase == "InProgress" {
+		a.HideForGame()
 		go a.fetchAndEmitInGameBuild()
 		go a.fetchAndEmitScouting()
+	} else if phase == "None" || phase == "Lobby" || phase == "Matchmaking" {
+		// When leaving a game, show overlay again and clear locked data
+		a.ShowAfterGame()
+		a.lockedChampionID = 0
+		a.lockedChampionName = ""
+		a.lockedPosition = ""
 	}
 }
 
 // fetchAndEmitInGameBuild fetches the build for the current in-game champion
 func (a *App) fetchAndEmitInGameBuild() {
-	// Get the current champion from the game session
-	championID, position, err := a.lcuClient.GetCurrentGameChampion()
-	if err != nil {
-		fmt.Printf("Failed to get current game champion: %v\n", err)
+	var championID int
+	var championName string
+	var role string
+
+	// Try to use saved champ select data first
+	if a.lockedChampionID > 0 && a.lockedPosition != "" {
+		championID = a.lockedChampionID
+		championName = a.lockedChampionName
+		role = a.lockedPosition
+		fmt.Printf("Using saved champ select data: %s (%d) %s\n", championName, championID, role)
+	} else if a.currentPUUID != "" {
+		// Fallback: Use stored PUUID to find ourselves in game
+		fmt.Println("No champ select data, using PUUID to find player in game...")
+
+		session, err := a.lcuClient.GetGameSession()
+		if err != nil {
+			runtime.EventsEmit(a.ctx, "ingame:build", map[string]interface{}{
+				"hasBuild": false,
+				"error":    "Failed to get game session",
+			})
+			return
+		}
+
+		// Find ourselves in the game
+		found := false
+		for _, player := range session.GameData.TeamOne {
+			if player.PUUID == a.currentPUUID {
+				championID = player.ChampionID
+				found = true
+				break
+			}
+		}
+		if !found {
+			for _, player := range session.GameData.TeamTwo {
+				if player.PUUID == a.currentPUUID {
+					championID = player.ChampionID
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found || championID == 0 {
+			runtime.EventsEmit(a.ctx, "ingame:build", map[string]interface{}{
+				"hasBuild": false,
+				"error":    "Could not find player in game",
+			})
+			return
+		}
+
+		championName = a.champions.GetName(championID)
+
+		// Get most played role for this champion from stats
+		if a.statsProvider != nil {
+			role = a.statsProvider.GetMostPlayedRole(championID)
+		}
+		if role == "" {
+			role = "middle" // Default fallback
+		}
+
+		fmt.Printf("Found via PUUID: %s (%d), inferred role: %s\n", championName, championID, role)
+	} else {
 		runtime.EventsEmit(a.ctx, "ingame:build", map[string]interface{}{
 			"hasBuild": false,
-			"error":    err.Error(),
+			"error":    "No player data available",
 		})
 		return
 	}
-
-	championName := a.champions.GetName(championID)
-	fmt.Printf("In-game champion: %s (ID: %d, Position: %s)\n", championName, championID, position)
-
-	// Normalize position - if empty or "NONE", try to infer from stats or use empty
-	role := normalizePosition(position)
 
 	// Fetch build data from stats provider
 	if a.statsProvider == nil {

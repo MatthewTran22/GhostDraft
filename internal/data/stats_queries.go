@@ -105,6 +105,38 @@ func (p *StatsProvider) GetPatch() string {
 	return p.currentPatch
 }
 
+// GetMostPlayedRole returns the most common role for a champion based on game count
+func (p *StatsProvider) GetMostPlayedRole(championID int) string {
+	var position string
+	err := p.db.QueryRow(`
+		SELECT team_position FROM champion_stats
+		WHERE champion_id = ?
+		GROUP BY team_position
+		ORDER BY SUM(matches) DESC
+		LIMIT 1
+	`, championID).Scan(&position)
+
+	if err != nil {
+		return ""
+	}
+
+	// Convert database position back to role
+	switch position {
+	case "TOP":
+		return "top"
+	case "JUNGLE":
+		return "jungle"
+	case "MIDDLE":
+		return "middle"
+	case "BOTTOM":
+		return "bottom"
+	case "UTILITY":
+		return "utility"
+	default:
+		return ""
+	}
+}
+
 // roleToPosition converts role names to database team_position values
 func roleToPosition(role string) string {
 	switch role {

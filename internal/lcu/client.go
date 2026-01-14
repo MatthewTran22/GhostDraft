@@ -351,24 +351,24 @@ func (c *Client) GetCurrentGameChampion() (int, string, error) {
 		return 0, "", fmt.Errorf("failed to get game session: %w", err)
 	}
 
-	// Check playerChampionSelections first
-	for _, player := range session.GameData.PlayerChampionSelections {
-		if player.PUUID == puuid {
-			return player.ChampionID, "", nil
-		}
-	}
-
-	// Check teamOne
+	// Check teamOne first (has position data)
 	for _, player := range session.GameData.TeamOne {
 		if player.PUUID == puuid {
 			return player.ChampionID, player.Position, nil
 		}
 	}
 
-	// Check teamTwo
+	// Check teamTwo (has position data)
 	for _, player := range session.GameData.TeamTwo {
 		if player.PUUID == puuid {
 			return player.ChampionID, player.Position, nil
+		}
+	}
+
+	// Fall back to playerChampionSelections (no position data)
+	for _, player := range session.GameData.PlayerChampionSelections {
+		if player.PUUID == puuid {
+			return player.ChampionID, "", nil
 		}
 	}
 

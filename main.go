@@ -28,14 +28,17 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 20, G: 20, B: 20, A: 255},
+		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind: []interface{}{
 			app,
 		},
 		Windows: &windows.Options{
-			DisableWindowIcon: true,
+			DisableWindowIcon:            true,
+			WebviewIsTransparent:         true,
+			WindowIsTranslucent:          true,
+			DisableFramelessWindowDecorations: true,
 		},
 	})
 

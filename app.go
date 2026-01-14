@@ -29,6 +29,14 @@ type App struct {
 	lastItemFetchKey    string
 	lastCounterFetchKey string
 	windowVisible       bool
+
+	// Champ select state - passed to in-game
+	lockedChampionID   int
+	lockedChampionName string
+	lockedPosition     string
+
+	// User identity - stored on LCU connection
+	currentPUUID string
 }
 
 // NewApp creates a new App application struct

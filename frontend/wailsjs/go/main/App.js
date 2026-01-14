@@ -34,8 +34,16 @@ export function GetPersonalStats() {
   return window['go']['main']['App']['GetPersonalStats']();
 }
 
+export function HideForGame() {
+  return window['go']['main']['App']['HideForGame']();
+}
+
 export function RegisterToggleHotkey() {
   return window['go']['main']['App']['RegisterToggleHotkey']();
+}
+
+export function ShowAfterGame() {
+  return window['go']['main']['App']['ShowAfterGame']();
 }
 
 export function ToggleWindow() {

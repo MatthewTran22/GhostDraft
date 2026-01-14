@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"syscall"
+	"time"
 	"unsafe"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -19,8 +20,10 @@ var (
 const (
 	WH_KEYBOARD_LL = 13
 	WM_KEYDOWN     = 0x0100
+	WM_KEYUP       = 0x0101
 	VK_O           = 0x4F
 	VK_CONTROL     = 0x11
+	VK_TAB         = 0x09
 )
 
 // KBDLLHOOKSTRUCT contains information about a low-level keyboard input event
@@ -43,6 +46,14 @@ type MSG struct {
 
 var appInstance *App
 var keyboardHook uintptr
+var tabPressed bool
+var stopGoldPoll chan struct{}
+
+// Track if gold box is shown during in-game Tab hold
+var isGoldBoxVisible bool
+
+// Saved window state for restoring after gold box
+var savedWindowX, savedWindowY, savedWindowW, savedWindowH int
 
 // isKeyPressed checks if a key is currently pressed
 func isKeyPressed(vk uintptr) bool {
@@ -52,12 +63,30 @@ func isKeyPressed(vk uintptr) bool {
 
 // keyboardProc is the low-level keyboard hook callback
 func keyboardProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
-	if nCode >= 0 && wParam == WM_KEYDOWN {
+	if nCode >= 0 {
 		kbStruct := (*KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
-		// Check for Ctrl+O
-		if kbStruct.VkCode == VK_O && isKeyPressed(VK_CONTROL) {
-			if appInstance != nil {
-				appInstance.ToggleWindow()
+
+		if wParam == WM_KEYDOWN {
+			// Check for Ctrl+O
+			if kbStruct.VkCode == VK_O && isKeyPressed(VK_CONTROL) {
+				if appInstance != nil {
+					appInstance.ToggleWindow()
+				}
+			}
+			// Check for Tab press
+			if kbStruct.VkCode == VK_TAB && !tabPressed {
+				tabPressed = true
+				if appInstance != nil {
+					appInstance.onTabPressed()
+				}
+			}
+		} else if wParam == WM_KEYUP {
+			// Check for Tab release
+			if kbStruct.VkCode == VK_TAB && tabPressed {
+				tabPressed = false
+				if appInstance != nil {
+					appInstance.onTabReleased()
+				}
 			}
 		}
 	}
@@ -133,4 +162,111 @@ func (a *App) hideWindow() {
 			}
 		}()
 	}
+}
+
+// onTabPressed shows gold box overlay when Tab is held in-game
+func (a *App) onTabPressed() {
+	// Only activate if in game
+	if !a.liveClient.IsGameRunning() {
+		return
+	}
+
+	isGoldBoxVisible = true
+
+	// Save current window state
+	savedWindowX, savedWindowY = wailsRuntime.WindowGetPosition(a.ctx)
+	savedWindowW, savedWindowH = wailsRuntime.WindowGetSize(a.ctx)
+
+	// Tell frontend to show gold box mode FIRST (hides overlay-box)
+	wailsRuntime.EventsEmit(a.ctx, "goldbox:show", true)
+
+	// Small delay to let frontend hide the overlay-box before resize
+	time.Sleep(10 * time.Millisecond)
+
+	// Get screen dimensions
+	screens, err := wailsRuntime.ScreenGetAll(a.ctx)
+	if err != nil || len(screens) == 0 {
+		return
+	}
+	screen := screens[0]
+
+	// Fullscreen transparent overlay
+	wailsRuntime.WindowSetSize(a.ctx, screen.Size.Width, screen.Size.Height)
+	wailsRuntime.WindowSetPosition(a.ctx, 0, 0)
+	wailsRuntime.WindowSetAlwaysOnTop(a.ctx, true)
+
+	a.showWindow()
+
+	// Start polling gold data
+	if stopGoldPoll != nil {
+		close(stopGoldPoll)
+	}
+	stopGoldPoll = make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		// Emit immediately
+		a.emitGoldUpdate()
+
+		for {
+			select {
+			case <-stopGoldPoll:
+				return
+			case <-ticker.C:
+				a.emitGoldUpdate()
+			}
+		}
+	}()
+}
+
+// onTabReleased hides gold box overlay
+func (a *App) onTabReleased() {
+	// Stop gold polling
+	if stopGoldPoll != nil {
+		close(stopGoldPoll)
+		stopGoldPoll = nil
+	}
+
+	// Hide and restore window if gold box was showing
+	if isGoldBoxVisible {
+		isGoldBoxVisible = false
+
+		// Tell frontend to hide gold box mode
+		wailsRuntime.EventsEmit(a.ctx, "goldbox:show", false)
+
+		// Hide window
+		a.hideWindow()
+		wailsRuntime.WindowSetAlwaysOnTop(a.ctx, false)
+
+		// Restore window size/position
+		wailsRuntime.WindowSetSize(a.ctx, savedWindowW, savedWindowH)
+		wailsRuntime.WindowSetPosition(a.ctx, savedWindowX, savedWindowY)
+	}
+}
+
+// emitGoldUpdate fetches and emits gold data to frontend
+func (a *App) emitGoldUpdate() {
+	if a.ctx == nil {
+		return
+	}
+	data := a.GetGoldDiff()
+	wailsRuntime.EventsEmit(a.ctx, "gold:update", data)
+}
+
+// HideForGame hides the overlay when entering a game
+func (a *App) HideForGame() {
+	if a.ctx == nil {
+		return
+	}
+	a.hideWindow()
+}
+
+// ShowAfterGame shows the overlay when leaving a game
+func (a *App) ShowAfterGame() {
+	if a.ctx == nil {
+		return
+	}
+	a.showWindow()
 }
