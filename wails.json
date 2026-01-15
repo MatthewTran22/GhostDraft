@@ -1,13 +1,19 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "ghostdraft",
-  "outputfilename": "ghostdraft",
+  "outputfilename": "GhostDraft",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "Matthew Tran",
-    "email": "matthewtran0122@gmail.com"
+    "name": "Matthew Tran"
+  },
+  "info": {
+    "companyName": "M-Tran Software",
+    "productName": "GhostDraft",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright © 2026 M-Tran Software",
+    "comments": "League of Legends companion overlay"
   }
 }

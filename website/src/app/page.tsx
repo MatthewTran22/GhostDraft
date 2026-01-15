@@ -20,12 +20,13 @@ export default function Home() {
               item build recommendations, and team composition analysis during champion select.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center reveal reveal-delay-2">
-              <Link
-                href="#download"
+              <a
+                href="https://github.com/MatthewTran22/LoLOverlay/releases/latest/download/GhostDraft.zip"
                 className="btn-hextech text-lg"
+                download
               >
                 Download for Windows
-              </Link>
+              </a>
               <Link
                 href="https://github.com/MatthewTran22/LoLOverlay"
                 target="_blank"
@@ -276,14 +277,13 @@ export default function Home() {
             Download GhostDraft for free and start making better decisions in champion select.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              href="https://github.com/MatthewTran22/LoLOverlay/releases/latest"
-              target="_blank"
-              rel="noopener noreferrer"
+            <a
+              href="https://github.com/MatthewTran22/LoLOverlay/releases/latest/download/GhostDraft.zip"
               className="btn-hextech text-lg pulse-glow"
+              download
             >
               Download for Windows
-            </Link>
+            </a>
           </div>
           <p className="text-[var(--text-muted)] text-sm mt-6">
             Windows 10/11 required. macOS and Linux coming soon.
