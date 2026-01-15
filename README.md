@@ -123,7 +123,9 @@ Browse champion statistics, builds, and matchups at the companion website:
 
 ## License
 
-MIT License - Copyright (c) 2026 M-Tran Software
+This project is open source software licensed under the [MIT License](LICENSE.md).
+
+Copyright (c) 2026 M-Tran Software
 
 ## Contributing
 
