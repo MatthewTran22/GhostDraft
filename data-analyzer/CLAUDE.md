@@ -22,11 +22,15 @@ Riot API → Collector (spider) → JSONL files → Reducer → Turso DB
 
 ```bash
 # One command to collect + reduce (recommended)
+# Auto-seeds from top Challenger player - no riot-id needed!
+go run cmd/pipeline/main.go --max-players=100
+
+# Or specify a starting player manually
 go run cmd/pipeline/main.go --riot-id="Player#NA1" --max-players=100
 
 # Or run steps separately:
-# 1. Collect match data (spider from a starting player)
-go run cmd/collector/main.go --riot-id="Player#NA1"
+# 1. Collect match data (auto-seeds from Challenger if no --riot-id)
+go run cmd/collector/main.go --max-players=100
 
 # 2. Process collected data and push to Turso
 go run cmd/reducer/main.go
@@ -35,7 +39,7 @@ go run cmd/reducer/main.go
 ### Pipeline Options
 ```bash
 go run cmd/pipeline/main.go \
-  --riot-id="Player#NA1" \  # Starting player (required)
+  --riot-id="Player#NA1" \  # Starting player (optional - auto-seeds from Challenger if omitted)
   --count=20 \              # Matches per player (default: 20)
   --max-players=100 \       # Max active players to collect (default: 100)
   --reduce-only             # Skip collection, only run reducer
@@ -69,7 +73,10 @@ TURSO_AUTH_TOKEN=your-token
    ├── Load .env (RIOT_API_KEY, BLOB_STORAGE_PATH)
    ├── Fetch current patch from Data Dragon
    ├── Create file rotator (writes to hot/)
-   └── Resolve starting player (--riot-id → PUUID)
+   └── Resolve starting player:
+       ├── If --riot-id provided → lookup PUUID
+       ├── If --puuid provided → use directly
+       └── If neither → auto-seed from top Challenger player
 
 2. SPIDER LOOP (worker pool with producer-consumer pattern)
    ├── Producer: Pop player from queue
@@ -91,6 +98,13 @@ TURSO_AUTH_TOKEN=your-token
 
 4. SHUTDOWN → Flush to warm/
 ```
+
+### Auto-Seeding from Challenger
+When no `--riot-id` is provided, the collector automatically fetches the top LP Challenger player as the seed:
+- Calls `/lol/league/v4/challengerleagues/by-queue/RANKED_SOLO_5x5`
+- Finds the player with highest LP
+- Uses their PUUID as the starting point
+- Guarantees a high-quality, active player to start the spider
 
 ### Rank Filtering
 Only players Emerald 4 or higher are collected:
@@ -264,13 +278,15 @@ When empty/missing, reducer uses `item0-5` for item stats but skips item slot st
 ## Riot API Endpoints Used
 
 ### Americas API (americas.api.riotgames.com)
-1. **Account Lookup**: `/riot/account/v1/accounts/by-riot-id/{gameName}/{tagLine}`
-2. **Match History**: `/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420&count=20`
-3. **Match Details**: `/lol/match/v5/matches/{matchId}`
-4. **Match Timeline**: `/lol/match/v5/matches/{matchId}/timeline` (for build order)
+1. **Account by Riot ID**: `/riot/account/v1/accounts/by-riot-id/{gameName}/{tagLine}`
+2. **Account by PUUID**: `/riot/account/v1/accounts/by-puuid/{puuid}` (get Riot ID from PUUID)
+3. **Match History**: `/lol/match/v5/matches/by-puuid/{puuid}/ids?queue=420&count=20`
+4. **Match Details**: `/lol/match/v5/matches/{matchId}`
+5. **Match Timeline**: `/lol/match/v5/matches/{matchId}/timeline` (for build order)
 
 ### Regional API (na1.api.riotgames.com)
-5. **Ranked Entries by PUUID**: `/lol/league/v4/entries/by-puuid/{puuid}` (get rank for filtering)
+6. **Ranked Entries by PUUID**: `/lol/league/v4/entries/by-puuid/{puuid}` (get rank for filtering)
+7. **Challenger League**: `/lol/league/v4/challengerleagues/by-queue/RANKED_SOLO_5x5` (for auto-seeding)
 
 ## Rate Limits (Dev Key)
 - 20 requests/second
@@ -304,7 +320,36 @@ data-analyzer/
 └── docker-compose.yml   # Single service (pipeline + Turso)
 ```
 
+## Testing
+
+### Unit Tests
+```bash
+# Run all unit tests (no API key needed)
+go test ./... -run "^Test[^_]*$" -v
+```
+
+### Integration Tests
+```bash
+# Requires valid RIOT_API_KEY in .env
+go test ./internal/riot -run TestGetTopChallengerPUUID_Integration -v
+go test ./internal/riot -run TestGetSoloQueueRank_Integration -v
+```
+
+### Test Naming Convention
+- **Unit tests**: `TestFunctionName` (e.g., `TestIsEmerald4OrHigher`)
+- **Integration tests**: `TestFunctionName_Integration` (e.g., `TestGetTopChallengerPUUID_Integration`)
+
+This convention allows Docker builds to run unit tests without requiring API keys.
+
 ## Docker
+
+### Build Process
+The Dockerfile runs unit tests during build. If tests fail, the build fails and no container is created.
+
+```dockerfile
+# Tests run automatically during build
+RUN go test ./... -run "^Test[^_]*$" -v
+```
 
 ### docker-compose.yml
 ```yaml
@@ -324,7 +369,7 @@ services:
 
 ### Running with Docker
 ```bash
-# Build and start
+# Build (runs tests) and start
 docker-compose up --build
 
 # Access Web UI at http://localhost:8080
@@ -336,7 +381,8 @@ The pipeline includes a web UI (`cmd/ui/`) for controlling collection and viewin
 
 ### Features
 - **Environment display**: Shows Riot API Key, Storage path, and Turso database status
-- **Pipeline settings**: Configure Riot ID, matches per player, max players
+- **Pipeline settings**: Configure Riot ID (optional), matches per player, max players
+- **Auto-seed**: Leave Riot ID empty to auto-seed from top Challenger player
 - **Reduce-only mode**: Skip collection, just run reducer on existing data
 - **Live output streaming**: SSE-based real-time log output
 - **Auto-push to Turso**: Reducer automatically pushes to Turso when complete

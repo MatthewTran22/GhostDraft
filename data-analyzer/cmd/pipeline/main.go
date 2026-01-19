@@ -42,19 +42,21 @@ func main() {
 
 	// Step 1: Run collector (unless skip flag set)
 	if !*skipCollector {
-		if *riotID == "" {
-			log.Fatal("--riot-id is required (or use --reduce-only to skip collection)")
-		}
-
 		fmt.Println("\n========================================")
 		fmt.Println("STEP 1: COLLECTING MATCH DATA")
-		fmt.Println("========================================\n")
+		fmt.Println("========================================")
 
 		collectorArgs := []string{
 			"run", "./cmd/collector",
-			"--riot-id=" + *riotID,
 			fmt.Sprintf("--count=%d", *matchCount),
 			fmt.Sprintf("--max-players=%d", *maxPlayers),
+		}
+
+		// Only add --riot-id if explicitly provided (otherwise collector auto-seeds from Challenger)
+		if *riotID != "" {
+			collectorArgs = append(collectorArgs, "--riot-id="+*riotID)
+		} else {
+			fmt.Println("No --riot-id provided, collector will auto-seed from Challenger leaderboard")
 		}
 
 		if err := runCommand(analyzerDir, "go", collectorArgs...); err != nil {
@@ -67,7 +69,7 @@ func main() {
 	// Step 2: Run reducer
 	fmt.Println("\n========================================")
 	fmt.Println("STEP 2: REDUCING & EXPORTING DATA")
-	fmt.Println("========================================\n")
+	fmt.Println("========================================")
 
 	reducerArgs := []string{
 		"run", "./cmd/reducer",

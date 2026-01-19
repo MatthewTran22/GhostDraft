@@ -13,6 +13,10 @@ RUN go mod download
 # Copy source
 COPY . .
 
+# Run unit tests (exclude integration tests that require API keys)
+# If tests fail, build fails and container won't be created
+RUN go test ./... -run "^Test[^_]*$" -v
+
 # Build all binaries
 RUN go build -o /bin/ui ./cmd/ui
 RUN go build -o /bin/collector ./cmd/collector

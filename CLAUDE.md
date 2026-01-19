@@ -253,9 +253,17 @@ See `data-analyzer/CLAUDE.md` for the match collection and aggregation pipeline.
 | `champion_item_slots` | ~20% | Timeline build order |
 | `champion_matchups` | 100% | Match details |
 
-### Exporting Stats Data
+### Running the Pipeline
 ```bash
 cd data-analyzer
+
+# Full pipeline: collect + reduce (auto-seeds from top Challenger)
+go run cmd/pipeline/main.go --max-players=100
+
+# Or with a specific starting player
+go run cmd/pipeline/main.go --riot-id="Player#NA1" --max-players=100
+
+# Reducer only (process existing data)
 go run cmd/reducer/main.go --output-dir=./export
 ```
 

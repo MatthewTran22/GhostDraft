@@ -255,8 +255,8 @@
             <form id="pipelineForm">
                 <div class="form-grid">
                     <div class="form-group">
-                        <label for="riot_id">Starting Riot ID</label>
-                        <input type="text" id="riot_id" name="riot_id" placeholder="Player#NA1">
+                        <label for="riot_id">Starting Riot ID (optional)</label>
+                        <input type="text" id="riot_id" name="riot_id" placeholder="Leave empty to auto-seed from Challenger">
                     </div>
                     <div class="form-group">
                         <label for="max_players">Max Players to Spider</label>
@@ -368,9 +368,8 @@
         // Connect to SSE stream
         connectStream();
 
-        // Toggle riot_id requirement based on reduce_only
+        // Disable riot_id input when reduce_only is checked (not collecting anyway)
         reduceOnly.addEventListener('change', () => {
-            riotIdInput.required = !reduceOnly.checked;
             riotIdInput.disabled = reduceOnly.checked;
         });
 

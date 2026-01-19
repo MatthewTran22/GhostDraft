@@ -115,13 +115,7 @@ func handleStart(w http.ResponseWriter, r *http.Request) {
 	maxPlayers := r.FormValue("max_players")
 	reduceOnly := r.FormValue("reduce_only") == "true"
 
-	if riotID == "" && !reduceOnly {
-		pipelineMu.Lock()
-		pipelineRunning = false
-		pipelineMu.Unlock()
-		json.NewEncoder(w).Encode(map[string]string{"error": "Riot ID is required"})
-		return
-	}
+	// riot_id is optional - collector will auto-seed from Challenger if not provided
 
 	go runPipeline(riotID, matchCount, maxPlayers, reduceOnly)
 
@@ -149,13 +143,19 @@ func runPipeline(riotID, matchCount, maxPlayers string, reduceOnly bool) {
 		// Run collector
 		broadcast("\n========================================")
 		broadcast("STEP 1: COLLECTING MATCH DATA")
-		broadcast("========================================\n")
+		broadcast("========================================")
 
 		args := []string{
 			"run", "./cmd/collector",
-			"--riot-id=" + riotID,
 			"--count=" + matchCount,
 			"--max-players=" + maxPlayers,
+		}
+
+		// Only add --riot-id if explicitly provided (otherwise collector auto-seeds from Challenger)
+		if riotID != "" {
+			args = append(args, "--riot-id="+riotID)
+		} else {
+			broadcast("[INFO] No Riot ID provided, auto-seeding from Challenger leaderboard")
 		}
 
 		if err := runCommandWithOutput(analyzerDir, "go", args...); err != nil {

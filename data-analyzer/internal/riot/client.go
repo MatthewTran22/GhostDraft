@@ -161,6 +161,16 @@ func (c *Client) GetAccountByRiotID(ctx context.Context, gameName, tagLine strin
 	return &account, err
 }
 
+// GetAccountByPUUID fetches account info by PUUID
+func (c *Client) GetAccountByPUUID(ctx context.Context, puuid string) (*AccountResponse, error) {
+	url := fmt.Sprintf("%s/riot/account/v1/accounts/by-puuid/%s",
+		americasBaseURL, puuid)
+
+	var account AccountResponse
+	err := c.doRequest(ctx, url, &account)
+	return &account, err
+}
+
 // GetMatchHistory fetches match IDs for a player
 func (c *Client) GetMatchHistory(ctx context.Context, puuid string, count int) ([]string, error) {
 	url := fmt.Sprintf("%s/lol/match/v5/matches/by-puuid/%s/ids?queue=420&count=%d",

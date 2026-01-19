@@ -53,22 +53,8 @@ func main() {
 	dataDir = strings.Trim(dataDir, "\"")
 	fmt.Printf("Using storage path: %s\n", dataDir)
 
-	if *riotID == "" && *puuid == "" {
-		fmt.Println("Usage:")
-		fmt.Println("  collector --riot-id='Player#NA1' [--count=20] [--max-players=100]")
-		fmt.Println("  collector --puuid=PUUID [--count=20] [--max-players=100]")
-		fmt.Println()
-		fmt.Println("Storage path is set via BLOB_STORAGE_PATH in .env")
-		fmt.Println()
-		fmt.Println("This will collect matches from the starting player, then snowball")
-		fmt.Println("to collect matches from other players found in those matches.")
-		fmt.Println()
-		fmt.Println("Data is written to rotating JSONL files in:")
-		fmt.Println("  hot/   - Active writes")
-		fmt.Println("  warm/  - Closed files awaiting processing")
-		fmt.Println("  cold/  - Compressed archives")
-		os.Exit(1)
-	}
+	// Auto-seed flag (no riot-id or puuid provided)
+	autoSeed := *riotID == "" && *puuid == ""
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -108,7 +94,16 @@ func main() {
 
 	// Get starting PUUID
 	var startingPUUID string
-	if *riotID != "" {
+	if autoSeed {
+		// Auto-seed from Challenger leaderboard
+		fmt.Println("No --riot-id provided, auto-seeding from Challenger leaderboard...")
+		topPUUID, err := client.GetTopChallengerPUUID(ctx)
+		if err != nil {
+			log.Fatalf("Failed to get top Challenger player: %v", err)
+		}
+		fmt.Printf("  Using top Challenger player: %s...\n", topPUUID[:20])
+		startingPUUID = topPUUID
+	} else if *riotID != "" {
 		parts := strings.SplitN(*riotID, "#", 2)
 		if len(parts) != 2 {
 			log.Fatalf("Invalid Riot ID format '%s', expected 'GameName#TagLine'", *riotID)

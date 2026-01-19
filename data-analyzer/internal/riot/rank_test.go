@@ -114,6 +114,14 @@ func TestGetTopChallengerPUUID_Integration(t *testing.T) {
 	}
 	t.Logf("Got PUUID: %s...%s", puuid[:8], puuid[len(puuid)-4:])
 
+	// Get player's Riot ID
+	t.Log("Fetching player's Riot ID...")
+	account, err := client.GetAccountByPUUID(ctx, puuid)
+	if err != nil {
+		t.Fatalf("GetAccountByPUUID failed: %v", err)
+	}
+	t.Logf("Top Challenger: %s#%s", account.GameName, account.TagLine)
+
 	// Verify this player is actually Challenger
 	t.Log("Verifying player rank...")
 	tier, division, hasRank, err := client.GetSoloQueueRank(ctx, puuid)
@@ -128,7 +136,7 @@ func TestGetTopChallengerPUUID_Integration(t *testing.T) {
 	if tier != "CHALLENGER" {
 		t.Errorf("Expected CHALLENGER tier, got %s %s", tier, division)
 	} else {
-		t.Logf("Verified: Player is %s %s", tier, division)
+		t.Logf("Verified: %s#%s is %s", account.GameName, account.TagLine, tier)
 	}
 
 	// Verify they qualify for data collection
