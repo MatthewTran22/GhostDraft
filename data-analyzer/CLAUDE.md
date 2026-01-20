@@ -16,7 +16,8 @@ Riot API → Collector (spider) → JSONL files → Reducer → Turso DB
 ### Components
 1. **Collector** - Spider that crawls match history from Riot API
 2. **Reducer** - Processes JSONL files into aggregated stats and pushes to Turso
-3. **Server** - Web UI for viewing collected data (optional)
+3. **ContinuousCollector** - Orchestrator for 24/7 collection with state machine
+4. **Server** - Web UI for viewing collected data (optional)
 
 ## Quick Start
 
@@ -171,6 +172,82 @@ This reduces API calls by ~40% while maintaining statistically representative bu
 4. ARCHIVE → warm/*.jsonl → cold/*.jsonl.gz
 ```
 
+### Refactored Reducer Components (internal/collector/)
+
+The reducer logic has been refactored into composable functions for the continuous collector:
+
+#### AggregateWarmFiles (reducer.go)
+```go
+// Reads all JSONL files from warm/ and returns aggregated stats in memory
+func AggregateWarmFiles(warmDir string, itemFilter ItemFilter) (*AggData, error)
+
+// AggData contains all aggregated statistics
+type AggData struct {
+    ChampionStats  map[ChampionStatsKey]*ChampionStats
+    ItemStats      map[ItemStatsKey]*ItemStats
+    ItemSlotStats  map[ItemSlotStatsKey]*ItemSlotStats
+    MatchupStats   map[MatchupStatsKey]*MatchupStats
+    DetectedPatch  string
+    FilesProcessed int
+    TotalRecords   int
+}
+```
+
+#### ArchiveWarmToCold (reducer.go)
+```go
+// Moves all .jsonl files from warm/ to cold/ with gzip compression
+func ArchiveWarmToCold(warmDir, coldDir string) (int, error)
+```
+
+#### TursoPusher (turso_pusher.go)
+```go
+// Async push queue - processes pushes sequentially in background
+type TursoPusher struct { ... }
+
+func NewTursoPusher(pusher DataPusher) *TursoPusher
+func (t *TursoPusher) Start(ctx context.Context)      // Start background goroutine
+func (t *TursoPusher) Push(ctx context.Context, data *AggData) error  // Queue push (non-blocking)
+func (t *TursoPusher) Wait()                          // Wait for pending pushes
+
+// Interface for mocking in tests
+type DataPusher interface {
+    PushAggData(ctx context.Context, data *AggData) error
+}
+```
+
+#### WarmLock (warmlock.go)
+```go
+// RWMutex wrapper to prevent hot→warm rotation during reducer processing
+type WarmLock struct { ... }
+
+func (w *WarmLock) RLock()    // Collector acquires for rotation (allows concurrent)
+func (w *WarmLock) RUnlock()
+func (w *WarmLock) Lock()     // Reducer acquires exclusive access
+func (w *WarmLock) Unlock()
+```
+
+#### WarmFileCounter (warmcounter.go)
+```go
+// Atomic counter that triggers callback when threshold is reached
+// Used to trigger reduce cycle after N warm file rotations
+type WarmFileCounter struct { ... }
+
+func NewWarmFileCounter(threshold int64, callback func()) *WarmFileCounter
+func (c *WarmFileCounter) Increment()   // Thread-safe increment, fires callback at threshold
+func (c *WarmFileCounter) Count() int64 // Get current count
+func (c *WarmFileCounter) Reset()       // Reset to 0, allows callback to fire again
+```
+
+### Reduce Cycle (Continuous Mode)
+```
+1. Acquire WarmLock (exclusive)
+2. AggregateWarmFiles() → AggData (in memory)
+3. ArchiveWarmToCold() → compress to cold/
+4. Release WarmLock
+5. TursoPusher.Push(AggData) → async, non-blocking
+6. Collector resumes immediately while Turso push runs in background
+```
+
 ### Reducer Features
 - **Patch normalization**: `14.24.448` → `14.24`
 - **Sampling-aware aggregation**:
@@ -299,20 +376,24 @@ When empty/missing, reducer uses `item0-5` for item stats but skips item slot st
 data-analyzer/
 ├── cmd/
 │   ├── collector/       # Spider crawler CLI
-│   ├── reducer/         # JSONL → Turso aggregator
+│   ├── reducer/         # JSONL → Turso aggregator (legacy, standalone)
 │   ├── pipeline/        # Combined collector + reducer
 │   ├── server/          # Web UI server (optional)
 │   └── ui/              # Web UI for pipeline control
 │       ├── main.go      # HTTP server with SSE streaming
 │       └── templates/   # HTML templates
 ├── internal/
-│   ├── collector/       # Spider with worker pool
-│   │   └── spider.go    # Producer-consumer pattern, bloom filters, timeline sampling
+│   ├── collector/       # Spider + Reducer components
+│   │   ├── spider.go        # Producer-consumer pattern, bloom filters, timeline sampling
+│   │   ├── reducer.go       # In-memory aggregation + archive (AggregateWarmFiles, ArchiveWarmToCold)
+│   │   ├── turso_pusher.go  # Async Turso push queue (TursoPusher, DataPusher interface)
+│   │   ├── warmlock.go      # RWMutex wrapper for warm directory synchronization
+│   │   └── warmcounter.go   # Atomic counter to trigger reduce at N file rotations
 │   ├── riot/            # Riot API client + Data Dragon
 │   │   ├── client.go    # HTTP client with rate limiting
 │   │   └── types.go     # API response structs
 │   ├── storage/         # JSONL file rotation
-│   │   ├── rotator.go   # FileRotator implementation
+│   │   ├── rotator.go   # FileRotator with FlushAndRotate for reducer coordination
 │   │   └── types.go     # RawMatch struct
 │   └── db/
 │       └── turso.go     # Turso client with bulk loading, upserts
@@ -326,6 +407,9 @@ data-analyzer/
 ```bash
 # Run all unit tests (no API key needed)
 go test ./... -run "^Test[^_]*$" -v
+
+# Run collector/reducer unit tests
+go test ./internal/collector/... -v
 ```
 
 ### Integration Tests
@@ -333,7 +417,22 @@ go test ./... -run "^Test[^_]*$" -v
 # Requires valid RIOT_API_KEY in .env
 go test ./internal/riot -run TestGetTopChallengerPUUID_Integration -v
 go test ./internal/riot -run TestGetSoloQueueRank_Integration -v
+
+# Reducer integration tests (uses in-memory SQLite, no external deps)
+go test ./internal/collector/... -run "^Test(ReduceCycle|TursoPush|FullPipeline)" -v
 ```
+
+### Test Files (internal/collector/)
+| File | Description |
+|------|-------------|
+| `reducer_test.go` | Unit tests for aggregation and archive |
+| `turso_pusher_test.go` | Unit tests for async push queue |
+| `reducer_integration_test.go` | Integration tests with real files and in-memory DB |
+| `warmlock_test.go` | Unit tests for RWMutex wrapper |
+| `warmlock_integration_test.go` | Stress tests for lock contention |
+| `warmcounter_test.go` | Unit tests for atomic file counter |
+| `warmcounter_integration_test.go` | Integration tests with rotator, concurrency stress tests |
+| `spider_test.go` | Data collection tests (requires API key) |
 
 ### Test Naming Convention
 - **Unit tests**: `TestFunctionName` (e.g., `TestIsEmerald4OrHigher`)

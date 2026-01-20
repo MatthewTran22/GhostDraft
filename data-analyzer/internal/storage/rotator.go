@@ -211,30 +211,104 @@ func (r *FileRotator) Stats() (matchesInCurrentFile int, currentFileName string)
 	return r.matchCount, filepath.Base(r.currentPath)
 }
 
-// CompressToClod compresses a warm file and moves it to cold storage
+// FlushAndRotate explicitly flushes the current hot file to warm directory and opens a new file.
+// This is called by the reducer to ensure all data is available for processing.
+// Returns true if a file was rotated (had data), false if the hot file was empty.
+// Thread-safe: uses internal mutex to synchronize with writes.
+func (r *FileRotator) FlushAndRotate() (rotated bool, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// If no file is open, nothing to flush
+	if r.currentFile == nil {
+		return false, nil
+	}
+
+	// Flush the buffer first
+	if err := r.currentWriter.Flush(); err != nil {
+		return false, fmt.Errorf("failed to flush buffer: %w", err)
+	}
+
+	// If the file has no data (no matches completed), don't move an empty file
+	if r.matchCount == 0 {
+		// Check if file has any data at all (could have partial writes)
+		info, err := r.currentFile.Stat()
+		if err != nil {
+			return false, fmt.Errorf("failed to stat current file: %w", err)
+		}
+		if info.Size() == 0 {
+			// Truly empty file - don't rotate, just keep using it
+			return false, nil
+		}
+	}
+
+	// Close current file
+	if err := r.currentFile.Close(); err != nil {
+		return false, fmt.Errorf("failed to close file: %w", err)
+	}
+
+	// Move to warm storage
+	warmPath := filepath.Join(r.warmDir, filepath.Base(r.currentPath))
+	if err := os.Rename(r.currentPath, warmPath); err != nil {
+		return false, fmt.Errorf("failed to move to warm storage: %w", err)
+	}
+	fmt.Printf("[Rotator] FlushAndRotate: moved %s to warm storage (%d matches)\n", filepath.Base(r.currentPath), r.matchCount)
+
+	// Open new file
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	filename := fmt.Sprintf("raw_matches_%s.jsonl", timestamp)
+	r.currentPath = filepath.Join(r.hotDir, filename)
+
+	file, err := os.Create(r.currentPath)
+	if err != nil {
+		return false, fmt.Errorf("failed to create new file: %w", err)
+	}
+
+	r.currentFile = file
+	r.currentWriter = bufio.NewWriterSize(file, 64*1024) // 64KB buffer
+	r.matchCount = 0
+	r.fileOpenedAt = time.Now()
+
+	fmt.Printf("[Rotator] FlushAndRotate: opened new file: %s\n", filename)
+	return true, nil
+}
+
+// CompressToCold compresses a warm file and moves it to cold storage
 func CompressToCold(warmPath, coldDir string) error {
 	// Open source file
 	src, err := os.Open(warmPath)
 	if err != nil {
 		return err
 	}
-	defer src.Close()
 
 	// Create compressed file
 	filename := filepath.Base(warmPath) + ".gz"
 	coldPath := filepath.Join(coldDir, filename)
 	dst, err := os.Create(coldPath)
 	if err != nil {
+		src.Close()
 		return err
 	}
-	defer dst.Close()
 
 	// Compress
 	gzWriter := gzip.NewWriter(dst)
 	if _, err := io.Copy(gzWriter, src); err != nil {
+		src.Close()
+		dst.Close()
 		return err
 	}
 	if err := gzWriter.Close(); err != nil {
+		src.Close()
+		dst.Close()
+		return err
+	}
+
+	// Close files before removing (required on Windows)
+	if err := src.Close(); err != nil {
+		dst.Close()
+		return err
+	}
+	if err := dst.Close(); err != nil {
 		return err
 	}
 
