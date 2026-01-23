@@ -25,8 +25,9 @@ type SpiderRunner interface {
 
 // API Key error types
 var (
-	ErrAPIKeyExpired   = errors.New("api key expired (401)")
-	ErrAPIKeyForbidden = errors.New("api key forbidden (403)")
+	ErrAPIKeyExpired      = errors.New("api key expired (401)")
+	ErrAPIKeyForbidden    = errors.New("api key forbidden (403)")
+	ErrCollectionComplete = errors.New("collection complete (max players reached)")
 )
 
 // IsAPIKeyError checks if an error indicates API key expiration (401 or 403)
@@ -125,10 +126,11 @@ type ContinuousCollector struct {
 	notifyFunc   NotifyFunc
 
 	// Internal state
-	reduceCycleCount atomic.Int64
-	keyExpired       atomic.Bool
-	shutdownCh       chan struct{}
-	shutdownOnce     sync.Once
+	reduceCycleCount   atomic.Int64
+	keyExpired         atomic.Bool
+	collectionComplete atomic.Bool // Set when max players reached
+	shutdownCh         chan struct{}
+	shutdownOnce       sync.Once
 
 	// Stats tracking for notifications
 	matchesCollected atomic.Int64
@@ -281,11 +283,17 @@ func (cc *ContinuousCollector) runSpider(ctx context.Context) {
 	}
 }
 
-// handleSpiderError handles errors from the spider, returns true if key expired
+// handleSpiderError handles errors from the spider, returns true if spider should stop
 func (cc *ContinuousCollector) handleSpiderError(ctx context.Context, err error) bool {
 	if IsAPIKeyError(err) {
 		log.Printf("[ContinuousCollector] API key expired: %v", err)
 		cc.keyExpired.Store(true)
+		cc.triggerReduce()
+		return true
+	}
+	if errors.Is(err, ErrCollectionComplete) {
+		log.Printf("[ContinuousCollector] Collection complete (max players reached), triggering final reduce...")
+		cc.collectionComplete.Store(true)
 		cc.triggerReduce()
 		return true
 	}
@@ -363,8 +371,11 @@ func (cc *ContinuousCollector) handlePushing(ctx context.Context) {
 	// Turso push happens here (actual implementation would push data)
 	log.Println("[ContinuousCollector] Push phase (placeholder)")
 
-	// Determine next state based on key expiration flag
-	if cc.keyExpired.Load() {
+	// Determine next state based on flags
+	if cc.collectionComplete.Load() {
+		log.Println("[ContinuousCollector] Collection complete, initiating shutdown...")
+		cc.initiateShutdown(ctx)
+	} else if cc.keyExpired.Load() {
 		log.Println("[ContinuousCollector] Key expired, transitioning to WAITING_FOR_KEY")
 		if err := cc.stateMachine.TransitionTo(StateWaitingForKey); err != nil {
 			log.Printf("[ContinuousCollector] Failed to transition to WAITING_FOR_KEY: %v", err)

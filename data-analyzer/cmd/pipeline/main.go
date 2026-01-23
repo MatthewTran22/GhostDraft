@@ -179,11 +179,20 @@ func runContinuousMode() {
 	defer rotator.Close()
 
 	// Create the real Spider with continuous mode config
+	// Read config from environment variables (with defaults)
+	matchesPerPlayer := getEnvInt("MATCHES_PER_PLAYER", 20)
+	maxPlayers := getEnvInt("MAX_PLAYERS", 10000)
+	workerCount := getEnvInt("WORKER_COUNT", 1)
+	timelineSamplingRate := getEnvFloat("TIMELINE_SAMPLING_RATE", 0.20)
+
+	log.Printf("Config: matches_per_player=%d, max_players=%d, workers=%d, timeline_rate=%.2f",
+		matchesPerPlayer, maxPlayers, workerCount, timelineSamplingRate)
+
 	spiderConfig := collector.SpiderConfig{
-		MatchesPerPlayer:     20,
-		MaxPlayers:           10000, // Unlimited for continuous mode
-		WorkerCount:          1,     // Single-threaded for RunContinuous
-		TimelineSamplingRate: 0.20,
+		MatchesPerPlayer:     matchesPerPlayer,
+		MaxPlayers:           maxPlayers,
+		WorkerCount:          workerCount,
+		TimelineSamplingRate: timelineSamplingRate,
 	}
 	spider := collector.NewSpider(riotClient, rotator, currentPatch, spiderConfig)
 
@@ -323,18 +332,38 @@ func runContinuousMode() {
 	warmDir := filepath.Join(storagePath, "warm")
 	coldDir := filepath.Join(storagePath, "cold")
 	reduceFunc := func(reduceCtx context.Context) error {
+		log.Println("[Reduce] ========================================")
 		log.Println("[Reduce] Starting reduce cycle...")
+		log.Printf("[Reduce] Warm directory: %s", warmDir)
+		log.Printf("[Reduce] Cold directory: %s", coldDir)
+
+		// List warm directory contents before processing
+		warmFiles, _ := filepath.Glob(filepath.Join(warmDir, "*.jsonl"))
+		log.Printf("[Reduce] Found %d warm files to process", len(warmFiles))
+		for i, f := range warmFiles {
+			if info, err := os.Stat(f); err == nil {
+				log.Printf("[Reduce]   [%d] %s (%.2f MB)", i+1, filepath.Base(f), float64(info.Size())/(1024*1024))
+			}
+		}
 
 		// First, flush hot file to warm
+		log.Println("[Reduce] Flushing hot file to warm...")
 		if rotated, err := rotator.FlushAndRotate(); err != nil {
 			log.Printf("[Reduce] Warning: FlushAndRotate failed: %v", err)
 		} else if rotated {
 			log.Println("[Reduce] Flushed hot file to warm")
+			// Re-check warm files after flush
+			warmFiles, _ = filepath.Glob(filepath.Join(warmDir, "*.jsonl"))
+			log.Printf("[Reduce] After flush: %d warm files", len(warmFiles))
+		} else {
+			log.Println("[Reduce] No hot file to flush (or empty)")
 		}
 
 		// Aggregate warm files
+		log.Println("[Reduce] Aggregating warm files...")
 		agg, err := collector.AggregateWarmFiles(warmDir, riot.IsCompletedItem)
 		if err != nil {
+			log.Printf("[Reduce] ERROR: Aggregation failed: %v", err)
 			return fmt.Errorf("aggregation failed: %w", err)
 		}
 
@@ -365,6 +394,7 @@ func runContinuousMode() {
 		}
 
 		log.Println("[Reduce] Reduce cycle complete")
+		log.Println("[Reduce] ========================================")
 		return nil
 	}
 
@@ -458,4 +488,32 @@ func findAnalyzerDir() string {
 	}
 
 	return ""
+}
+
+// getEnvInt reads an integer from an environment variable, returning defaultVal if not set or invalid
+func getEnvInt(key string, defaultVal int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	var result int
+	if _, err := fmt.Sscanf(val, "%d", &result); err != nil {
+		log.Printf("Warning: Invalid value for %s=%q, using default %d", key, val, defaultVal)
+		return defaultVal
+	}
+	return result
+}
+
+// getEnvFloat reads a float from an environment variable, returning defaultVal if not set or invalid
+func getEnvFloat(key string, defaultVal float64) float64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	var result float64
+	if _, err := fmt.Sscanf(val, "%f", &result); err != nil {
+		log.Printf("Warning: Invalid value for %s=%q, using default %.2f", key, val, defaultVal)
+		return defaultVal
+	}
+	return result
 }

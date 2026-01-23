@@ -14,6 +14,11 @@ services:
       - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
+      # Pipeline configuration (optional - these are the defaults)
+      - MAX_PLAYERS=${MAX_PLAYERS:-10000}
+      - MATCHES_PER_PLAYER=${MATCHES_PER_PLAYER:-20}
+      - WORKER_COUNT=${WORKER_COUNT:-1}
+      - TIMELINE_SAMPLING_RATE=${TIMELINE_SAMPLING_RATE:-0.20}
     volumes:
       - ./data:/app/data
 

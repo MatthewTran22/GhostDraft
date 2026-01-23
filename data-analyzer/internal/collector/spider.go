@@ -497,8 +497,8 @@ func (s *Spider) RunContinuous(ctx context.Context) error {
 
 	// Check if we've hit max players
 	if atomic.LoadInt64(&s.activePlayerCount) >= int64(s.maxPlayers) {
-		// Return nil - caller should wait and call again
-		return nil
+		log.Printf("[Spider] Max players reached (%d/%d), signaling collection complete", s.activePlayerCount, s.maxPlayers)
+		return ErrCollectionComplete
 	}
 
 	// Get next player from queue
