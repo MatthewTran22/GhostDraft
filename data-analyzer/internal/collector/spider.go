@@ -495,11 +495,6 @@ func (s *Spider) RunContinuous(ctx context.Context) error {
 		s.startTime = time.Now()
 	}
 
-	// Check if we've hit max players
-	if atomic.LoadInt64(&s.activePlayerCount) >= int64(s.maxPlayers) {
-		log.Printf("[Spider] Max players reached (%d/%d), signaling collection complete", s.activePlayerCount, s.maxPlayers)
-		return ErrCollectionComplete
-	}
 
 	// Get next player from queue
 	puuid := s.popPlayer()
@@ -541,9 +536,9 @@ func (s *Spider) RunContinuous(ctx context.Context) error {
 	}
 
 	elapsed := time.Since(s.startTime)
-	fmt.Printf("\n[Player %d/%d] [%s] Processing: %s... (%s %s, %d matches)\n",
-		atomic.LoadInt64(&s.activePlayerCount), s.maxPlayers,
-		formatDuration(elapsed), puuid[:min(16, len(puuid))], tier, division, len(matchIDs))
+	totalMatches := atomic.LoadInt64(&s.totalMatches)
+	fmt.Printf("\n[%d matches] [%s] Processing: %s... (%s %s, %d new)\n",
+		totalMatches, formatDuration(elapsed), puuid[:min(16, len(puuid))], tier, division, len(matchIDs))
 
 	// Process matches synchronously in continuous mode
 	for _, matchID := range matchIDs {
@@ -651,6 +646,14 @@ func (s *Spider) Reset() {
 	s.startTime = time.Time{}
 
 	log.Println("[Spider] Reset complete")
+}
+
+// ResetPlayerCount resets just the player count so collection can continue.
+// Keeps bloom filters and queue intact - used when max players reached mid-session.
+func (s *Spider) ResetPlayerCount() {
+	prevCount := atomic.LoadInt64(&s.activePlayerCount)
+	atomic.StoreInt64(&s.activePlayerCount, 0)
+	log.Printf("[Spider] Reset player count (was %d, now 0) - continuing from queue", prevCount)
 }
 
 // SeedFromChallenger seeds the spider with the top Challenger player.

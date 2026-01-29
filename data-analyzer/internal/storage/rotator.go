@@ -33,6 +33,9 @@ type FileRotator struct {
 	currentPath   string
 	matchCount    int
 	fileOpenedAt  time.Time
+
+	// Callback when a file is rotated to warm (optional)
+	onRotateToWarm func()
 }
 
 // NewFileRotator creates a new rotator with the given base directory
@@ -71,6 +74,14 @@ func (r *FileRotator) SetColdDir(path string) error {
 	r.coldDir = path
 	r.mu.Unlock()
 	return nil
+}
+
+// SetOnRotateCallback sets a callback that fires when a file is rotated to warm storage.
+// Used by ContinuousCollector to track warm file count and trigger reduce cycles.
+func (r *FileRotator) SetOnRotateCallback(callback func()) {
+	r.mu.Lock()
+	r.onRotateToWarm = callback
+	r.mu.Unlock()
 }
 
 // WriteLine writes a participant record to the current JSONL file
@@ -149,6 +160,11 @@ func (r *FileRotator) rotate() error {
 			return fmt.Errorf("failed to move to warm storage: %w", err)
 		}
 		fmt.Printf("[Rotator] Moved %s to warm storage (%d matches)\n", filepath.Base(r.currentPath), r.matchCount)
+
+		// Notify callback (outside lock to avoid deadlock)
+		if r.onRotateToWarm != nil {
+			go r.onRotateToWarm()
+		}
 	}
 
 	// Generate new filename
@@ -195,6 +211,11 @@ func (r *FileRotator) Close() error {
 			return err
 		}
 		fmt.Printf("[Rotator] Closed and moved %s to warm (%d matches)\n", filepath.Base(r.currentPath), r.matchCount)
+
+		// Notify callback
+		if r.onRotateToWarm != nil {
+			go r.onRotateToWarm()
+		}
 	} else {
 		// Remove empty file
 		os.Remove(r.currentPath)
@@ -253,6 +274,11 @@ func (r *FileRotator) FlushAndRotate() (rotated bool, err error) {
 		return false, fmt.Errorf("failed to move to warm storage: %w", err)
 	}
 	fmt.Printf("[Rotator] FlushAndRotate: moved %s to warm storage (%d matches)\n", filepath.Base(r.currentPath), r.matchCount)
+
+	// Notify callback
+	if r.onRotateToWarm != nil {
+		go r.onRotateToWarm()
+	}
 
 	// Open new file
 	timestamp := time.Now().Format("2006-01-02_15-04-05")

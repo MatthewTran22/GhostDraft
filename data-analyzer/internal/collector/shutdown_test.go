@@ -369,7 +369,7 @@ func TestShutdown_Integration_MultipleSignals(t *testing.T) {
 
 // mockSpiderForTest is a test helper
 type mockSpiderForTest struct {
-	runCalls  atomic.Int32
+	runCalls   atomic.Int32
 	resetCalls atomic.Int32
 	seedCalls  atomic.Int32
 }

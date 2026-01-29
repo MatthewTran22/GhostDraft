@@ -15,12 +15,47 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
       # Pipeline configuration (optional - these are the defaults)
-      - MAX_PLAYERS=${MAX_PLAYERS:-10000}
       - MATCHES_PER_PLAYER=${MATCHES_PER_PLAYER:-20}
       - WORKER_COUNT=${WORKER_COUNT:-1}
       - TIMELINE_SAMPLING_RATE=${TIMELINE_SAMPLING_RATE:-0.20}
+      - WARM_FILE_THRESHOLD=${WARM_FILE_THRESHOLD:-10}
     volumes:
       - ./data:/app/data
+
+  # One-shot collection mode (for testing - does NOT restart)
+  collect:
+    build: .
+    container_name: lol-collect
+    command: ["/app/pipeline", "--continuous"]
+    restart: "no"
+    profiles: ["tools"]
+    environment:
+      - RIOT_API_KEY=${RIOT_API_KEY}
+      - BLOB_STORAGE_PATH=/app/data
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID}
+      - MATCHES_PER_PLAYER=${MATCHES_PER_PLAYER:-20}
+      - WORKER_COUNT=${WORKER_COUNT:-1}
+      - TIMELINE_SAMPLING_RATE=${TIMELINE_SAMPLING_RATE:-0.20}
+      - WARM_FILE_THRESHOLD=${WARM_FILE_THRESHOLD:-1}
+    volumes:
+      - ./data:/app/data
+
+  # One-off reducer (run with: docker-compose run --rm reducer)
+  reducer:
+    build: .
+    container_name: lol-reducer
+    command: ["/app/reducer"]
+    profiles: ["tools"]  # Won't start with `docker-compose up`
+    environment:
+      - BLOB_STORAGE_PATH=/app/data
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
+    volumes:
+      - ./data:/app/data
+      - ./export:/app/export
 
   # Web UI for manual pipeline control
   ui:

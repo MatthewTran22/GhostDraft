@@ -212,16 +212,17 @@ func runContinuousMode() {
 	apiKey := os.Getenv("RIOT_API_KEY")
 	valid, validationErr := keyValidator.ValidateKey(ctx, apiKey)
 
-	// Determine if key needs replacement (invalid or validation failed)
-	keyNeedsReplacement := !valid || validationErr != nil
+	// Only request new key if we DEFINITIVELY know it's invalid
+	// If validation errored (timeout, network issue), continue and let spider handle it
+	keyDefinitelyInvalid := !valid && validationErr == nil
 	if validationErr != nil {
 		log.Printf("Warning: Could not validate API key: %v (will attempt to continue)", validationErr)
 	}
-	if !valid && validationErr == nil {
+	if keyDefinitelyInvalid {
 		log.Println("API key is invalid or expired!")
 	}
 
-	if keyNeedsReplacement {
+	if keyDefinitelyInvalid {
 		// Send Discord notification for key issues
 		if discordBot != nil {
 			log.Println("Sending Discord notification about key issue...")
@@ -400,6 +401,9 @@ func runContinuousMode() {
 
 	// Create configuration
 	config := collector.DefaultConfig()
+	warmFileThreshold := getEnvInt("WARM_FILE_THRESHOLD", 10)
+	config.WarmFileThreshold = int64(warmFileThreshold)
+	log.Printf("Reduce trigger: every %d warm files", warmFileThreshold)
 
 	// Create continuous collector
 	cc = collector.NewContinuousCollector(
@@ -410,6 +414,12 @@ func runContinuousMode() {
 		notifyFunc,
 		config,
 	)
+
+	// Wire up rotator callback to increment warm file count
+	rotator.SetOnRotateCallback(func() {
+		log.Println("[Rotator] File rotated to warm, incrementing counter...")
+		cc.IncrementWarmFileCount()
+	})
 
 	// Start TursoPusher background worker if available
 	if tursoPusher != nil {
